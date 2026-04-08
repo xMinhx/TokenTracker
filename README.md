@@ -1,76 +1,45 @@
 <div align="center">
 
-# TOKEN TRACKER
+# Token Tracker
 
-**Track AI Token Usage Across All Your CLI Tools**
+### Know exactly what you're spending on AI — across every CLI
 
-[![Website](https://img.shields.io/badge/Website-token.rynn.me-blue.svg)](https://token.rynn.me)
+Auto-collect token counts from **8 AI coding tools**, aggregate them locally, and see real cost trends in a beautiful dashboard. No cloud account, no API keys, no setup — just one command.
+
+[![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
+[![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg)](https://www.npmjs.com/package/tokentracker-cli)
-[![Node.js Support](https://img.shields.io/badge/Node.js-≥20-brightgreen.svg)](https://nodejs.org/)
-[![Platform](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
+[![Platform](https://img.shields.io/badge/macOS-supported-lightgrey.svg)](https://www.apple.com/macos/)
 [![GitHub stars](https://img.shields.io/github/stars/mm7894215/TokenTracker?style=social)](https://github.com/mm7894215/TokenTracker/stargazers)
 
-⭐ **If TokenTracker saves you time, please [star us on GitHub](https://github.com/mm7894215/TokenTracker) — it helps other developers find it.**
+<br/>
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard (Dark)" width="800" />
+<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard" width="820" />
+
+<br/><br/>
+
+⭐ **If TokenTracker saves you time, please [star it on GitHub](https://github.com/mm7894215/TokenTracker) — it helps other developers find it.**
 
 </div>
 
 ---
 
-## Two Ways to Use
-
-### Option A: macOS Menu Bar App (Recommended)
-
-Download `TokenTrackerBar.dmg` from the [latest release](https://github.com/mm7894215/tokentracker/releases/latest), drag to Applications, done.
-
-- Lives in your menu bar — click to see usage stats
-- Auto-syncs data from all supported CLI tools
-- No terminal, no Node.js, no setup required
-- **Clawd pixel companion** — animated menu bar icon with breathing, blinking, and eye tracking
-- **Interactive dashboard buddy** — Clawd reacts to your usage data with 30+ contextual quips, 5 tap animations, and data-driven moods
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/menubar.gif" alt="Menu Bar App" width="420" />
-</div>
-
-#### First launch: Gatekeeper may block the app
-
-TokenTrackerBar is distributed **ad-hoc signed** (not notarized with an Apple Developer ID — that requires a paid account). macOS Gatekeeper may block the first launch with one of two messages. Pick the matching fix:
-
-**Case 1 — "TokenTrackerBar can't be opened because Apple cannot check it for malicious software"** (or "unidentified developer")
-
-1. Open **System Settings → Privacy & Security**
-2. Scroll to the **Security** section — you'll see a line like *"TokenTrackerBar was blocked to protect your Mac."*
-3. Click **Open Anyway** next to it
-4. Confirm with **Open** in the follow-up dialog (you'll need to authenticate)
-
-You only need to do this once. Older macOS alternative: right-click the app in Finder → **Open** → **Open** in the confirmation dialog.
-
-**Case 2 — "TokenTrackerBar is damaged and can't be opened. You should move it to the Trash"**
-
-This is Gatekeeper reacting to the `com.apple.quarantine` attribute macOS attaches to every downloaded file, not an actual problem with the app. Clear it once with:
-
-```bash
-xattr -cr /Applications/TokenTrackerBar.app
-```
-
-After that the app opens normally. You only need to do this once per download.
-
-### Option B: CLI + Web Dashboard
+## ⚡ Quick Start
 
 ```bash
 npx tokentracker-cli
 ```
 
-One command does everything: first-time setup → hook installation → data sync → open dashboard at `http://localhost:7680`.
+That's it. First run installs hooks, syncs your data, and opens the dashboard at `http://localhost:7680`.
+
+> **Want a native macOS menu bar app?** [Download `TokenTrackerBar.dmg`](https://github.com/mm7894215/TokenTracker/releases/latest) → drag to Applications. Includes desktop widgets, menu bar status icon, and the same dashboard in a WKWebView.
 
 Install globally for shorter commands:
 
 ```bash
 npm i -g tokentracker-cli
-tokentracker              # Open dashboard
+
+tokentracker              # Open the dashboard
 tokentracker sync         # Manual sync
 tokentracker status       # Check hook status
 tokentracker doctor       # Health check
@@ -78,109 +47,150 @@ tokentracker doctor       # Health check
 
 ---
 
-<div align="center">
-  <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" alt="Token Tracker Dashboard (Light)" width="800" />
-</div>
+## ✨ Features
 
-## Desktop Widgets
+- 🔌 **8 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Kiro, OpenCode, OpenClaw, Every Code
+- 🏠 **100% local** — Token data never leaves your machine. No account, no API keys.
+- 🚀 **Zero config** — Hooks auto-install on first run. From zero to dashboard in 30 seconds.
+- 📊 **Beautiful dashboard** — Usage trends, cost breakdowns by model, GitHub-style activity heatmap, project attribution
+- 🖥️ **Native macOS app** — Menu bar status icon, embedded server, WKWebView dashboard
+- 🎨 **4 desktop widgets** — Pin Usage / Activity Heatmap / Top Models / Usage Limits to your desktop
+- 📈 **Real-time rate limit tracking** — Claude / Codex / Cursor / Gemini / Kiro / Antigravity quota windows with reset countdowns
+- 💰 **Cost engine** — 70+ model pricing tables, accurate USD breakdowns
+- 🌐 **Optional leaderboard** — Compare with developers worldwide (opt-in, sign in to participate)
+- 🔒 **Privacy-first** — Only token counts and timestamps. Never prompts, responses, or file contents.
 
-Pin your token usage to the macOS desktop with four focused widgets. Each one shows a single thing well — no chrome, no titles, no "updated just now" footer. Drop them anywhere via right-click → **Edit Widgets** → search "TokenTracker".
+---
 
-<div align="center">
-  <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/widgets-overview.png" alt="TokenTracker desktop widgets" width="800" />
-</div>
+## 🖼️ Showcase
 
-| Widget | Sizes | What it shows |
+<table>
+<tr>
+<td width="50%">
+
+**Dashboard** — usage trends, model breakdown, cost analysis
+
+<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" alt="Dashboard" />
+
+</td>
+<td width="50%">
+
+**Desktop Widgets** — pin usage to your desktop
+
+<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/widgets-overview.png" alt="Desktop Widgets" />
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Menu Bar App** — animated Clawd companion + native panels
+
+<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/menubar.gif" alt="Menu Bar App" />
+
+</td>
+<td width="50%">
+
+**Global Leaderboard** — compare with developers worldwide
+
+<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/leaderboard.png" alt="Leaderboard" />
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🔌 Supported AI Tools
+
+| Tool | Detection | Method |
 |---|---|---|
-| **Usage** | S / M / L / XL | Today's tokens with delta vs yesterday. Medium adds a 7-day hero block + 14-day sparkline. Large adds a 30-day hero block, 30-day bar chart, and inline top 3 models. |
-| **Activity Heatmap** | M / L / XL | GitHub-style daily activity grid filling the whole tile, with current streak as a tint chip in the corner. |
-| **Top Models** | S / M / L | Ranked list of the most-used models with token counts, share %, and colored bars. |
-| **Usage Limits** | M / L | Rate-limit progress for Claude / Codex / Cursor / Gemini / Kiro / Antigravity. Auto-sorted by urgency, grouped by provider, with reset countdowns. Bars and labels turn red when ≥ 90 %. |
+| **Claude Code** | ✅ Auto | SessionEnd hook in `settings.json` |
+| **Codex CLI** | ✅ Auto | TOML notify hook in `config.toml` |
+| **Cursor** | ✅ Auto | API + SQLite auth token |
+| **Kiro** | ✅ Auto | SQLite + JSONL hybrid |
+| **Gemini CLI** | ✅ Auto | SessionEnd hook |
+| **OpenCode** | ✅ Auto | Plugin system + SQLite |
+| **OpenClaw** | ✅ Auto | Session plugin |
+| **Every Code** | ✅ Auto | TOML notify hook |
 
-Widgets refresh every 15 minutes (and immediately whenever the menu bar app pulls fresh data). All data is read from the same local snapshot the dashboard uses — no extra network requests, no extra background work.
+Missing your tool? [Open an issue](https://github.com/mm7894215/TokenTracker/issues/new) — adding new providers is usually one parser file away.
 
-## Leaderboard
+---
 
-Compare your token usage with developers worldwide. Sign in to join the ranking.
+## 🆚 Why TokenTracker?
 
-<div align="center">
-  <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/leaderboard.png" alt="Leaderboard" width="800" />
-</div>
+|                              | **TokenTracker**           | ccusage      | Cursor stats   | Native CLI dashboards |
+|------------------------------|----------------------------|--------------|----------------|------------------------|
+| **AI tools supported**       | **8** (multi-tool)         | 1 (Claude)   | 1 (Cursor)     | 1 each                 |
+| **Local-first, no account**  | ✅                          | ✅            | ❌ requires login | varies              |
+| **Native macOS menu bar**    | ✅                          | ❌            | ❌              | ❌                      |
+| **Desktop widgets**          | ✅ 4 widgets                | ❌            | ❌              | ❌                      |
+| **Rate-limit tracking**      | ✅ 6 providers              | ❌            | Cursor only    | ❌                      |
+| **Cost breakdown**           | ✅ 70+ models               | Claude only  | Cursor only    | varies                 |
+| **Activity heatmap**         | ✅                          | ❌            | ❌              | ❌                      |
+| **Project attribution**      | ✅                          | ❌            | ❌              | ❌                      |
+| **License**                  | MIT (free)                 | MIT (free)   | proprietary    | varies                 |
 
-## Features
+---
 
-- **Multi-Source Tracking** — Claude Code, Codex CLI, Cursor, Kiro, Gemini CLI, OpenCode, OpenClaw, Every Code
-- **Local-First** — All data stays on your machine. No cloud account required.
-- **Zero-Config** — Hooks auto-detect and configure on first run
-- **Built-in Dashboard** — Web UI with usage trends, model breakdowns, heatmaps
-- **Desktop Widgets** — Four focused macOS widgets (Usage / Heatmap / Top Models / Usage Limits)
-- **Leaderboard** — Global ranking with weekly, monthly, and all-time stats
-- **Privacy-First** — Only token counts tracked, never prompts or responses
+## 🏗️ How It Works
 
-## Supported CLI Tools
-
-| CLI Tool | Auto-Detection |
-|----------|----------------|
-| **Claude Code** | ✅ |
-| **Codex CLI** | ✅ |
-| **Cursor** | ✅ (via API) |
-| **Kiro** | ✅ |
-| **Gemini CLI** | ✅ |
-| **OpenCode** | ✅ |
-| **OpenClaw** | ✅ |
-| **Every Code** | ✅ |
-
-## How It Works
-
-```
-AI CLI Tools (Claude, Codex, Cursor, Kiro, Gemini, OpenCode, ...)
-    │
-    │  hooks auto-trigger on usage
-    ▼
-Token Tracker (local parsing + aggregation)
-    │
-    │  30-minute UTC buckets
-    ▼
-Dashboard (Menu Bar App or localhost:7680)
+```mermaid
+flowchart LR
+    A["AI CLI Tools<br/>Claude · Codex · Cursor<br/>Gemini · Kiro · OpenCode · ..."]
+    A -->|hooks trigger| B[Token Tracker]
+    B -->|parse logs<br/>30-min UTC buckets| C[(Local SQLite)]
+    C --> D[Web Dashboard]
+    C --> E[Menu Bar App]
+    C --> F[Desktop Widgets]
+    C -.->|opt-in| G[(Cloud Leaderboard)]
 ```
 
-1. AI CLI tools generate logs during usage
-2. Lightweight hooks detect changes and trigger sync (Cursor: usage pulled via API)
-3. CLI parses logs locally, extracts only token counts
-4. Data aggregated into 30-minute buckets
-5. Dashboard reads local data directly — no cloud needed
+1. AI CLI tools generate logs during normal use
+2. Lightweight hooks detect changes and trigger sync (Cursor uses API instead of hooks)
+3. Token counts parsed locally — never any prompt or response content
+4. Aggregated into 30-minute UTC buckets
+5. Dashboard, menu bar app, and widgets all read from the same local snapshot
 
-## Privacy
+---
+
+## 🛡️ Privacy
 
 | Protection | Description |
-|------------|-------------|
-| **No Content Upload** | Never uploads prompts or responses — only token counts |
-| **Local Only** | All data stays on your machine, all analysis local |
-| **Transparent** | Audit the sync logic in `src/lib/rollout.js` — only numbers and timestamps |
+|---|---|
+| **No content upload** | Only token counts and timestamps. Never prompts, responses, or file contents. |
+| **Local-only by default** | All data stays on your machine. The leaderboard is fully opt-in. |
+| **Auditable** | Open source. Read [`src/lib/rollout.js`](src/lib/rollout.js) — only numbers and timestamps. |
+| **No telemetry** | No analytics, no crash reporting, no phone-home. |
 
-## Configuration
+---
 
-### Environment Variables
+## 📦 Configuration
+
+Most users never need this — defaults are sensible. For advanced setups:
 
 | Variable | Description | Default |
-|----------|-------------|---------|
-| `TOKENTRACKER_DEBUG` | Enable debug output (`1` to enable) | - |
-| `TOKENTRACKER_HTTP_TIMEOUT_MS` | HTTP timeout (ms) | `20000` |
-| `CODEX_HOME` | Codex CLI directory override | `~/.codex` |
-| `GEMINI_HOME` | Gemini CLI directory override | `~/.gemini` |
+|---|---|---|
+| `TOKENTRACKER_DEBUG` | Enable debug output (`1` to enable) | — |
+| `TOKENTRACKER_HTTP_TIMEOUT_MS` | HTTP timeout in milliseconds | `20000` |
+| `CODEX_HOME` | Override Codex CLI directory | `~/.codex` |
+| `GEMINI_HOME` | Override Gemini CLI directory | `~/.gemini` |
 
-## Development
+---
+
+## 🛠️ Development
 
 ```bash
-git clone https://github.com/mm7894215/tokentracker.git
-cd tokentracker
+git clone https://github.com/mm7894215/TokenTracker.git
+cd TokenTracker
 npm install
 
-# Build and run web dashboard
+# Build dashboard + run CLI
 cd dashboard && npm install && npm run build && cd ..
 node bin/tracker.js
 
-# Run tests
+# Tests
 npm test
 ```
 
@@ -188,20 +198,77 @@ npm test
 
 ```bash
 cd TokenTrackerBar
-npm run dashboard:build          # Build dashboard (from repo root)
-./scripts/bundle-node.sh         # Download Node.js + bundle tokentracker
-xcodegen generate                # Generate Xcode project
-ruby scripts/patch-pbxproj-icon.rb  # Patch Icon Composer support
+npm run dashboard:build              # Build the dashboard bundle
+./scripts/bundle-node.sh             # Bundle Node.js + tokentracker source
+xcodegen generate                    # Generate the Xcode project
+ruby scripts/patch-pbxproj-icon.rb   # Patch in the Icon Composer asset
 xcodebuild -scheme TokenTrackerBar -configuration Release clean build
-./scripts/create-dmg.sh          # Create distributable DMG
+./scripts/create-dmg.sh              # Package the .app into a DMG
 ```
 
-Requires: Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+Requires **Xcode 16+** and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
-## Credits
+---
 
-Clawd pixel art inspired by [Clawd-on-Desk](https://github.com/Angel2518975237/Clawd-on-Desk) by [@marciogranzotto](https://github.com/marciogranzotto).
-Clawd character design belongs to Anthropic. This is a community project with no official affiliation with Anthropic.
+## 🔧 Troubleshooting
+
+<details>
+<summary><b>macOS: "TokenTrackerBar can't be opened" — unidentified developer</b></summary>
+
+<br/>
+
+TokenTrackerBar is **ad-hoc signed** (not notarized with an Apple Developer ID — that requires a paid developer account). Gatekeeper blocks it on first launch with a friendly-looking but unhelpful dialog.
+
+1. Open **System Settings → Privacy & Security**
+2. Scroll to the **Security** section — you'll see *"TokenTrackerBar was blocked to protect your Mac."*
+3. Click **Open Anyway**
+4. Confirm with **Open** in the follow-up dialog (you'll need to authenticate)
+
+You only need to do this once. Older macOS alternative: right-click the app in Finder → **Open** → **Open** in the confirmation dialog.
+
+</details>
+
+<details>
+<summary><b>macOS: "TokenTrackerBar is damaged and can't be opened"</b></summary>
+
+<br/>
+
+This is Gatekeeper reacting to the `com.apple.quarantine` attribute macOS attaches to every downloaded file — not an actual problem. Clear it once with:
+
+```bash
+xattr -cr /Applications/TokenTrackerBar.app
+```
+
+After that the app opens normally. You only need to do this once per download.
+
+</details>
+
+<details>
+<summary><b>macOS privacy prompts on first launch</b></summary>
+
+<br/>
+
+You may see one or both of these prompts the first time you run TokenTrackerBar:
+
+- **"TokenTrackerBar wants to access data from other apps"** — This is required for the **Cursor** and **Kiro** integrations. They store auth tokens / usage data inside their own `~/Library/Application Support/` folders, which macOS protects with the App Management permission. Click **Allow** to grant. If you don't use Cursor or Kiro, click **Don't Allow** — those providers will be silently skipped, all others continue working.
+
+Once granted, the permission is remembered. Note that ad-hoc signed builds re-prompt after each upgrade because each build has a new signing identity.
+
+</details>
+
+---
+
+## ⭐ Star History
+
+<a href="https://star-history.com/#mm7894215/TokenTracker&Date">
+  <img src="https://api.star-history.com/svg?repos=mm7894215/TokenTracker&type=Date" alt="Star History Chart" width="600" />
+</a>
+
+---
+
+## 🙏 Credits
+
+Clawd pixel art inspired by [Clawd-on-Desk](https://github.com/Angel2518975237/Clawd-on-Desk) by [@marciogranzotto](https://github.com/marciogranzotto). The Clawd character design belongs to Anthropic. This is a community project with no official affiliation with Anthropic.
 
 ## License
 
@@ -210,6 +277,9 @@ Clawd character design belongs to Anthropic. This is a community project with no
 ---
 
 <div align="center">
-  <b>Token Tracker</b> — Quantify your AI output.<br/>
-  <a href="https://token.rynn.me">token.rynn.me</a> · Made by developers, for developers.
+
+**Token Tracker** — Quantify your AI output.
+
+<a href="https://token.rynn.me">token.rynn.me</a>  ·  <a href="https://www.npmjs.com/package/tokentracker-cli">npm</a>  ·  <a href="https://github.com/mm7894215/TokenTracker">GitHub</a>
+
 </div>
