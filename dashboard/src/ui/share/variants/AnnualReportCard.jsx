@@ -8,21 +8,34 @@ const CARD_W = VARIANT_SIZES["annual-report"].width;
 // Hero: 12-month heatmap. Supporting: two stats + two facts. Brand: one footer line.
 
 const BG = "#0a0820";
-const WHITE = "#ffffff";
+const WHITE = "#ffffffee";
 const DIM = "rgba(255,255,255,0.45)";
 const ACCENT = "#a78bfa";
 const GRID = "rgba(70,55,180,0.10)";
 
-// Glass card shared style
+// Glass — heatmap card: subtle layered inset glow
 const GLASS = {
-  background: "rgba(30,20,80,0.45)",
-  backdropFilter: "blur(24px)",
-  WebkitBackdropFilter: "blur(24px)",
-  borderTop: "1px solid rgba(255,255,255,0.18)",
-  borderLeft: "1px solid rgba(255,255,255,0.08)",
-  borderRight: "1px solid rgba(255,255,255,0.05)",
-  borderBottom: "1px solid rgba(255,255,255,0.03)",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 8px 32px rgba(0,0,0,0.3)",
+  background: "rgba(255,255,255,0.01)",
+  backdropFilter: "blur(40px)",
+  WebkitBackdropFilter: "blur(40px)",
+  border: "1px solid rgba(255,255,255,0.05)",
+  boxShadow: [
+    "0 39px 56px -36px rgba(255,255,255,0.10) inset",
+    "0 7px 11px -4px rgba(255,255,255,0.06) inset",
+    "0 -82px 68px -64px rgba(101,67,149,0.08) inset",
+    "0 98px 100px -48px rgba(208,171,255,0.06) inset",
+    "0 4px 18px 0 rgba(156,146,215,0.06) inset",
+    "0 1px 40px 0 rgba(228,222,255,0.04) inset",
+  ].join(", "),
+};
+
+// Glass — small bars: subtle border + minimal glow
+const GLASS_SM = {
+  background: "rgba(255,255,255,0.02)",
+  backdropFilter: "blur(32px)",
+  WebkitBackdropFilter: "blur(32px)",
+  border: "1px solid rgba(255,255,255,0.06)",
+  boxShadow: "0 1px 8px 0 rgba(228,222,255,0.06) inset",
 };
 
 const F = '"Space Grotesk", "Inter Tight", sans-serif';
@@ -32,8 +45,8 @@ const EMPTY = "#1f1845";
 const PAL = [EMPTY, "#4a3d8f", "#6b5cbe", "#9060e0", "#d946ef"];
 
 // Layout — cells sized to fill card width tightly.
-const PAD = 36;
-const CP = 24; // card padding
+const PAD = 48;
+const CP = 28; // card padding
 const CG = 4;  // cell gap
 const MG = 20; // month column gap
 const INNER = CARD_W - PAD * 2 - CP * 2;
@@ -147,15 +160,18 @@ export function AnnualReportCard({ data }) {
       <div style={{position:"absolute",left:0,right:0,bottom:0,height:"55%",perspective:"600px",perspectiveOrigin:"50% 0%",overflow:"hidden",pointerEvents:"none"}}>
         <div style={{width:"200%",height:"200%",marginLeft:"-50%",transform:"rotateX(55deg)",transformOrigin:"50% 0%",backgroundImage:`linear-gradient(rgba(90,70,240,0.12) 1px,transparent 1px),linear-gradient(90deg,rgba(90,70,240,0.12) 1px,transparent 1px)`,backgroundSize:"80px 80px"}}/>
       </div>
-      {/* Radial glow behind content */}
-      <div style={{position:"absolute",left:"50%",top:"40%",width:"120%",height:"60%",transform:"translate(-50%,-50%)",background:"radial-gradient(ellipse at center,rgba(90,70,240,0.08) 0%,transparent 70%)",pointerEvents:"none"}}/>
+      {/* Diffuse ambient glow blobs — large, soft */}
+      <div style={{position:"absolute",left:"-30%",top:"-10%",width:"120%",height:"80%",background:"radial-gradient(ellipse at center,rgba(70,40,160,0.25) 0%,transparent 70%)",pointerEvents:"none"}}/>
+      <div style={{position:"absolute",right:"-30%",top:"15%",width:"110%",height:"70%",background:"radial-gradient(ellipse at center,rgba(100,50,200,0.20) 0%,transparent 70%)",pointerEvents:"none"}}/>
+      <div style={{position:"absolute",left:"-20%",bottom:"-15%",width:"130%",height:"65%",background:"radial-gradient(ellipse at center,rgba(50,30,150,0.25) 0%,transparent 70%)",pointerEvents:"none"}}/>
+      <div style={{position:"absolute",right:"-10%",bottom:"-5%",width:"80%",height:"50%",background:"radial-gradient(ellipse at center,rgba(150,80,240,0.12) 0%,transparent 70%)",pointerEvents:"none"}}/>
       {/* Scan line accent */}
-      <div style={{position:"absolute",left:0,right:0,top:"62%",height:2,background:`linear-gradient(90deg,transparent 0%,${ACCENT}33 30%,${ACCENT}55 50%,${ACCENT}33 70%,transparent 100%)`,pointerEvents:"none"}}/>
+      <div style={{position:"absolute",left:0,right:0,top:"62%",height:2,background:`linear-gradient(90deg,transparent 0%,${ACCENT}22 30%,${ACCENT}44 50%,${ACCENT}22 70%,transparent 100%)`,pointerEvents:"none"}}/>
 
       <div style={{position:"relative",zIndex:1,display:"flex",flexDirection:"column",height:"100%",padding:PAD,boxSizing:"border-box"}}>
 
         {/* ── HEADER — brand left, avatar right ── */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:GAP*2}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:GAP*3}}>
           <div style={{display:"flex",alignItems:"center",gap:16}}>
             <img src="/app-icon.png" alt="" width={64} height={64} style={{width:64,height:64,borderRadius:16,display:"block"}}/>
             <div>
@@ -168,7 +184,7 @@ export function AnnualReportCard({ data }) {
               {url?<img src={url} alt="" width={48} height={48} style={{width:48,height:48,objectFit:"cover",display:"block"}} crossOrigin="anonymous" referrerPolicy="no-referrer"/>
                   :<span style={{fontSize:20,fontWeight:700,color:WHITE}}>{ini}</span>}
             </div>
-            <div style={{fontSize:22,fontWeight:700,color:WHITE}}>{data.handle}</div>
+            <div style={{fontSize:32,fontWeight:700,color:WHITE}}>{data.handle}</div>
           </div>
         </div>
 
@@ -191,26 +207,26 @@ export function AnnualReportCard({ data }) {
 
         {/* ── STATS: 2 big cards ── */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:GAP,marginBottom:GAP}}>
-          <div style={{...GLASS,borderRadius:18,padding:"28px 16px",textAlign:"center"}}>
+          <div style={{...GLASS_SM,borderRadius:22,padding:"28px 16px",textAlign:"center"}}>
             <div style={{fontFamily:F_NUM,fontSize:52,fontWeight:700,color:WHITE,letterSpacing:"-0.02em",lineHeight:1}}>{formatTokens(data.totalTokens)}</div>
-            <div style={{fontSize:16,color:DIM,marginTop:12}}>Total Tokens</div>
+            <div style={{fontSize:22,color:DIM,marginTop:12}}>Total Tokens</div>
           </div>
-          <div style={{...GLASS,borderRadius:18,padding:"28px 16px",textAlign:"center"}}>
+          <div style={{...GLASS_SM,borderRadius:22,padding:"28px 16px",textAlign:"center"}}>
             <div style={{fontFamily:F_NUM,fontSize:52,fontWeight:700,color:WHITE,letterSpacing:"-0.02em",lineHeight:1}}>{formatCost(data.totalCost)}</div>
-            <div style={{fontSize:16,color:DIM,marginTop:12}}>Estimated Cost</div>
+            <div style={{fontSize:22,color:DIM,marginTop:12}}>Estimated Cost</div>
           </div>
         </div>
 
         {/* ── FACTS: 2 horizontal bars ── */}
         <div style={{display:"flex",flexDirection:"column",gap:GAP}}>
-          <div style={{...GLASS,borderRadius:16,padding:"18px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{...GLASS_SM,borderRadius:22,padding:"18px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83"/><circle cx="12" cy="12" r="4"/></svg>
               <span style={{fontSize:20,color:DIM}}>Longest Streak</span>
             </div>
             <span style={{fontFamily:F_NUM,fontSize:28,fontWeight:700,color:WHITE}}>{str} days</span>
           </div>
-          <div style={{...GLASS,borderRadius:16,padding:"18px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{...GLASS_SM,borderRadius:22,padding:"18px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><circle cx="12" cy="12" r="4"/></svg>
               <span style={{fontSize:20,color:DIM}}>Top Model</span>
@@ -222,10 +238,10 @@ export function AnnualReportCard({ data }) {
         {/* ── FOOTER ── */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:"auto"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <img src="/app-icon.png" alt="" width={32} height={32} style={{width:32,height:32,borderRadius:8,display:"block"}}/>
-            <span style={{fontSize:17,fontWeight:600,color:WHITE}}>Token Tracker</span>
+            <img src="/app-icon.png" alt="" width={44} height={44} style={{width:44,height:44,borderRadius:8,display:"block"}}/>
+            <span style={{fontSize:22,fontWeight:600,color:WHITE}}>Token Tracker</span>
           </div>
-          <span style={{fontSize:17,fontWeight:600,color:ACCENT}}>token.rynn.me</span>
+          <span style={{fontSize:22,fontWeight:600,color:ACCENT}}>token.rynn.me</span>
         </div>
 
       </div>
