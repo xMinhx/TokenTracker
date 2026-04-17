@@ -126,6 +126,7 @@ const SOURCE_COLUMN_MAP: Record<string, string> = {
   openclaw: "openclaw_tokens",
   hermes: "hermes_tokens",
   kiro: "kiro_tokens",
+  copilot: "copilot_tokens",
 };
 
 interface DateRange {
@@ -175,6 +176,7 @@ interface UserAgg {
   openclaw_tokens: number;
   hermes_tokens: number;
   kiro_tokens: number;
+  copilot_tokens: number;
   other_tokens: number;
   total_tokens: number;
   estimated_cost_usd: number;
@@ -190,6 +192,7 @@ function newUserAgg(): UserAgg {
     openclaw_tokens: 0,
     hermes_tokens: 0,
     kiro_tokens: 0,
+    copilot_tokens: 0,
     other_tokens: 0,
     total_tokens: 0,
     estimated_cost_usd: 0,
@@ -376,6 +379,7 @@ export default async function (req: Request): Promise<Response> {
         openclaw_tokens: agg.openclaw_tokens,
         hermes_tokens: agg.hermes_tokens,
         kiro_tokens: agg.kiro_tokens,
+        copilot_tokens: agg.copilot_tokens,
         other_tokens: agg.other_tokens,
         total_tokens: agg.total_tokens,
         estimated_cost_usd: Math.round(agg.estimated_cost_usd * 100) / 100,

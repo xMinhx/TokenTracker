@@ -10,6 +10,7 @@ export const LEADERBOARD_TOKEN_COLUMNS = [
   { key: "gemini_tokens", copyKey: "leaderboard.column.gemini", icon: "/brand-logos/gemini.svg" },
   { key: "cursor_tokens", copyKey: "leaderboard.column.cursor", icon: "/brand-logos/cursor.svg" },
   { key: "kiro_tokens", copyKey: "leaderboard.column.kiro", icon: "/brand-logos/kiro.svg" },
+  { key: "copilot_tokens", copyKey: "leaderboard.column.copilot", icon: "/brand-logos/copilot.svg" },
   { key: "opencode_tokens", copyKey: "leaderboard.column.opencode", icon: "/brand-logos/opencode.svg" },
   { key: "openclaw_tokens", copyKey: "leaderboard.column.openclaw", icon: "/brand-logos/openclaw.svg" },
   { key: "hermes_tokens", copyKey: "leaderboard.column.hermes", icon: null },

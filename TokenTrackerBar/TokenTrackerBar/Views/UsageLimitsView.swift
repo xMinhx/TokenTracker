@@ -16,6 +16,7 @@ struct UsageLimitsView: View {
             (limits.gemini.configured, limits.gemini.error),
             (limits.kiro.configured, limits.kiro.error),
             (limits.antigravity.configured, limits.antigravity.error),
+            (limits.copilot?.configured ?? false, limits.copilot?.error),
         ]
         return providers.contains { $0.0 && $0.1 == nil }
     }
@@ -73,6 +74,10 @@ struct UsageLimitsView: View {
                 groups.append(AnyView(toolSection(title: "Kiro", assetName: "KiroLogo") { kiroContent(limits.kiro) }))
             case "antigravity" where limits.antigravity.configured && limits.antigravity.error == nil:
                 groups.append(AnyView(toolSection(title: "Antigravity", assetName: "AntigravityLogo") { antigravityContent(limits.antigravity) }))
+            case "copilot":
+                if let copilot = limits.copilot, copilot.configured, copilot.error == nil {
+                    groups.append(AnyView(toolSection(title: "GitHub Copilot", assetName: "CopilotLogo") { copilotContent(copilot) }))
+                }
             default:
                 break
             }
@@ -175,6 +180,19 @@ struct UsageLimitsView: View {
         }
     }
 
+    // MARK: - Copilot
+
+    private func copilotContent(_ copilot: CopilotLimits) -> some View {
+        VStack(spacing: 4) {
+            if let w = copilot.primaryWindow {
+                limitRow(label: "Premium", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "GitHub Copilot")
+            }
+            if let w = copilot.secondaryWindow {
+                limitRow(label: "Chat", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "GitHub Copilot")
+            }
+        }
+    }
+
     // MARK: - Antigravity
 
     private func antigravityContent(_ antigravity: AntigravityLimits) -> some View {
@@ -266,8 +284,14 @@ struct UsageLimitsView: View {
     @ViewBuilder
     private func brandIcon(_ name: String) -> some View {
         switch name {
-        case "CursorLogo", "KiroLogo":
-            let filename = name == "CursorLogo" ? "cursor.svg" : "kiro.svg"
+        case "CursorLogo", "KiroLogo", "CopilotLogo":
+            let filename: String = {
+                switch name {
+                case "CursorLogo": return "cursor.svg"
+                case "KiroLogo": return "kiro.svg"
+                default: return "copilot.svg"
+                }
+            }()
             if let image = bundledSVGIcon(
                 named: filename,
                 replacingCurrentColorWith: colorScheme == .dark ? "#FFFFFF" : "#111111"

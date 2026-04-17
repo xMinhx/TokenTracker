@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 import { Card } from "../../openai/components";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
+import { copy } from "../../../lib/copy";
 
 function formatReset(isoOrUnix) {
   if (!isoOrUnix) return null;
@@ -64,7 +65,7 @@ function ToolGroup({ name, icon, children }) {
   );
 }
 
-const DEFAULT_ORDER = ["claude", "codex", "cursor", "gemini", "kiro", "antigravity"];
+const DEFAULT_ORDER = ["claude", "codex", "cursor", "gemini", "kiro", "copilot", "antigravity"];
 
 function renderProviderGroup(id, data) {
   const ok = (p) => p?.configured && !p.error;
@@ -116,13 +117,54 @@ function renderProviderGroup(id, data) {
           {data.tertiary_window ? <LimitBar label="Flash" pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} /> : null}
         </ToolGroup>
       );
+    case "copilot":
+      return (
+        <ToolGroup key="copilot" name="GitHub Copilot" icon="/brand-logos/copilot.svg">
+          {data.primary_window ? <LimitBar label="Premium" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} /> : null}
+          {data.secondary_window ? <LimitBar label="Chat" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} /> : null}
+          {data.otel_has_files || data.otel_enabled ? null : <CopilotOtelHint defaultDir={data.otel_default_dir} />}
+        </ToolGroup>
+      );
     default:
       return null;
   }
 }
 
-export function UsageLimitsPanel({ claude, codex, cursor, gemini, kiro, antigravity, order, visibility }) {
-  const dataById = { claude, codex, cursor, gemini, kiro, antigravity };
+function CopilotOtelHint({ defaultDir }) {
+  const [copied, setCopied] = useState(false);
+  const dir = defaultDir || "$HOME/.copilot/otel";
+  const snippet = [
+    "export COPILOT_OTEL_ENABLED=true",
+    "export COPILOT_OTEL_EXPORTER_TYPE=file",
+    `export COPILOT_OTEL_FILE_EXPORTER_PATH="${dir}/copilot-otel-$(date +%Y%m%d).jsonl"`,
+  ].join("\n");
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(snippet);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch (_e) {}
+  };
+
+  return (
+    <div className="mt-1 rounded-md border border-amber-300/60 dark:border-amber-700/40 bg-amber-50/50 dark:bg-amber-900/10 px-2.5 py-2 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
+      <div className="font-medium text-oai-gray-700 dark:text-oai-gray-200">{copy("limits.copilot.otelHint.title")}</div>
+      <div className="mt-0.5 leading-snug">{copy("limits.copilot.otelHint.body")}</div>
+      <pre className="mt-1.5 overflow-x-auto rounded bg-oai-gray-100 dark:bg-oai-gray-900/60 px-2 py-1.5 font-mono text-[10.5px] leading-tight whitespace-pre">{snippet}</pre>
+      <button
+        type="button"
+        onClick={onCopy}
+        className="mt-1 inline-flex items-center gap-1 rounded border border-oai-gray-300 dark:border-oai-gray-700 px-1.5 py-0.5 text-[10.5px] text-oai-gray-700 dark:text-oai-gray-200 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 transition-colors"
+      >
+        {copied ? copy("limits.copilot.otelHint.copied") : copy("limits.copilot.otelHint.copy")}
+      </button>
+    </div>
+  );
+}
+
+export function UsageLimitsPanel({ claude, codex, cursor, gemini, kiro, antigravity, copilot, order, visibility }) {
+  const dataById = { claude, codex, cursor, gemini, kiro, antigravity, copilot };
   const effectiveOrder = Array.isArray(order) && order.length > 0 ? order : DEFAULT_ORDER;
 
   const groups = effectiveOrder

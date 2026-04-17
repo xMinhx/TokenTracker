@@ -50,6 +50,26 @@ describe("parseCursorCsv — new format", () => {
   });
 });
 
+// ── parseCursorCsv — newest format with Cloud Agent ID / Automation ID ──
+
+describe("parseCursorCsv — with Cloud Agent ID columns", () => {
+  const csvText = `Date,Cloud Agent ID,Automation ID,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens,Cost
+"2026-04-16T03:32:33.284Z","","","On-Demand","composer-2-fast","No","0","3189","194368","1815","199372","0.11"
+"2026-04-15T03:39:53.013Z","","","On-Demand","auto","No","0","132586","93728","2303","228617","0.20"`;
+
+  it("resolves model by header name, not fixed index", () => {
+    const records = parseCursorCsv(csvText);
+    assert.equal(records.length, 2);
+    assert.equal(records[0].model, "composer-2-fast");
+    assert.equal(records[0].kind, "On-Demand");
+    assert.equal(records[0].inputTokens, 3189);
+    assert.equal(records[0].cacheReadTokens, 194368);
+    assert.equal(records[0].outputTokens, 1815);
+    assert.equal(records[0].totalTokens, 199372);
+    assert.equal(records[1].model, "auto");
+  });
+});
+
 // ── parseCursorCsv — old format ──
 
 describe("parseCursorCsv — old format", () => {

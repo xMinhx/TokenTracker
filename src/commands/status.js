@@ -13,6 +13,7 @@ const {
 } = require("../lib/gemini-config");
 const { resolveOpencodeConfigDir, isOpencodePluginInstalled } = require("../lib/opencode-config");
 const { collectLocalSubscriptions } = require("../lib/subscriptions");
+const { describeCopilotOtelStatus, readCopilotOauthToken } = require("../lib/usage-limits");
 const { normalizeState: normalizeUploadState } = require("../lib/upload-throttle");
 const { collectTrackerDiagnostics } = require("../lib/diagnostics");
 const { probeOpenclawHookState } = require("../lib/openclaw-hook");
@@ -111,6 +112,10 @@ async function cmdStatus(argv = []) {
   const subscriptionLines =
     subscriptions.length > 0 ? subscriptions.map(formatSubscriptionLine) : [];
 
+  const copilotToken = readCopilotOauthToken({ home });
+  const copilotOtel = describeCopilotOtelStatus({ home, env: process.env });
+  const copilotLines = formatCopilotLines({ token: copilotToken, otel: copilotOtel });
+
   process.stdout.write(
     [
       "Status:",
@@ -133,12 +138,36 @@ async function cmdStatus(argv = []) {
       `- Opencode plugin: ${opencodePluginConfigured ? "set" : "unset"}`,
       `- OpenClaw session plugin: ${openclawSessionPluginState?.configured ? "set" : "unset"}`,
       `- OpenClaw hook (legacy): ${openclawHookState?.configured ? "set" : "unset"}`,
+      ...copilotLines,
       ...subscriptionLines,
       "",
     ]
       .filter(Boolean)
       .join("\n"),
   );
+}
+
+function formatCopilotLines({ token, otel }) {
+  if (!token && !otel.otel_has_files) return [];
+  const limitsState = token ? "set (via GitHub OAuth)" : "unset (no Copilot OAuth token found)";
+  const usageState = otel.otel_has_files
+    ? `set (${otel.otel_path || otel.otel_default_dir})`
+    : otel.otel_enabled
+      ? "enabled but no files yet"
+      : "unset (OTEL export not enabled)";
+  const lines = [
+    `- GitHub Copilot limits: ${limitsState}`,
+    `- GitHub Copilot usage (OTEL): ${usageState}`,
+  ];
+  if (!otel.otel_has_files) {
+    lines.push(
+      "    To track Copilot token usage, add to your shell profile:",
+      "      export COPILOT_OTEL_ENABLED=true",
+      "      export COPILOT_OTEL_EXPORTER_TYPE=file",
+      `      export COPILOT_OTEL_FILE_EXPORTER_PATH="${otel.otel_default_dir}/copilot-otel-$(date +%Y%m%d).jsonl"`,
+    );
+  }
+  return lines;
 }
 
 function formatSubscriptionLine(entry = {}) {

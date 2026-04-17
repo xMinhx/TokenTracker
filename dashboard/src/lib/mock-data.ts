@@ -503,7 +503,8 @@ export function getMockLeaderboard({
     const opencode = Math.floor(total * 0.08);
     const hermes = Math.floor(total * 0.03);
     const kiro = Math.floor(total * 0.02);
-    const openclaw = Math.max(0, total - gpt - claude - gemini - cursor - opencode - hermes - kiro);
+    const copilot = Math.floor(total * 0.04);
+    const openclaw = Math.max(0, total - gpt - claude - gemini - cursor - opencode - hermes - kiro - copilot);
     const isPublic = id % 7 !== 0;
     return {
       id,
@@ -520,6 +521,7 @@ export function getMockLeaderboard({
       openclaw_tokens: openclaw,
       hermes_tokens: hermes,
       kiro_tokens: kiro,
+      copilot_tokens: copilot,
       other_tokens: 0,
       total_tokens: total,
     };
@@ -545,7 +547,9 @@ export function getMockLeaderboard({
                   ? "hermes_tokens"
                   : safeMetric === "kiro"
                     ? "kiro_tokens"
-                    : "total_tokens";
+                    : safeMetric === "copilot"
+                      ? "copilot_tokens"
+                      : "total_tokens";
 
   const sorted = raw
     .slice()
@@ -564,6 +568,7 @@ export function getMockLeaderboard({
       openclaw_tokens: String(entry.openclaw_tokens),
       hermes_tokens: String(entry.hermes_tokens ?? 0),
       kiro_tokens: String(entry.kiro_tokens ?? 0),
+      copilot_tokens: String(entry.copilot_tokens ?? 0),
       other_tokens: String(entry.other_tokens ?? 0),
       total_tokens: String(entry.total_tokens),
       is_public: Boolean(entry.is_public),
@@ -581,6 +586,7 @@ export function getMockLeaderboard({
         openclaw_tokens: meRow.openclaw_tokens,
         hermes_tokens: meRow.hermes_tokens,
         kiro_tokens: meRow.kiro_tokens,
+        copilot_tokens: meRow.copilot_tokens,
         other_tokens: meRow.other_tokens,
         total_tokens: meRow.total_tokens,
       }
@@ -594,6 +600,7 @@ export function getMockLeaderboard({
         openclaw_tokens: "0",
         hermes_tokens: "0",
         kiro_tokens: "0",
+        copilot_tokens: "0",
         other_tokens: "0",
         total_tokens: "0",
       };

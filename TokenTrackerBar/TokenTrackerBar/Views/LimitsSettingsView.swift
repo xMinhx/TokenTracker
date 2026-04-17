@@ -73,8 +73,14 @@ struct LimitsSettingsView: View {
     @ViewBuilder
     private func providerIcon(id: String) -> some View {
         switch id {
-        case "cursor", "kiro":
-            let filename = id == "cursor" ? "cursor.svg" : "kiro.svg"
+        case "cursor", "kiro", "copilot":
+            let filename: String = {
+                switch id {
+                case "cursor": return "cursor.svg"
+                case "kiro": return "kiro.svg"
+                default: return "copilot.svg"
+                }
+            }()
             if let image = bundledSVGIcon(named: filename, color: colorScheme == .dark ? "#FFFFFF" : "#111111") {
                 Image(nsImage: image)
                     .resizable()

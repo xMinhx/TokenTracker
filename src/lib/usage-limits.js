@@ -616,6 +616,148 @@ function parseKiroUsageOutput(output, { now = new Date() } = {}) {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GitHub Copilot — `GET https://api.github.com/copilot_internal/user`
+// Reuses the OAuth token from the user's existing Copilot install
+// (`~/.config/github-copilot/{apps,hosts}.json`). No device flow needed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function readCopilotOauthToken({ home = require("node:os").homedir() } = {}) {
+  const candidates = [
+    path.join(home, ".config", "github-copilot", "apps.json"),
+    path.join(home, ".config", "github-copilot", "hosts.json"),
+  ];
+  // Keys are either "github.com", "github.example.com" (enterprise), or a
+  // composite like "github.com:Iv1.b507a08c87ecfe98". We always hit
+  // api.github.com, so prefer the public-host token; only fall back to
+  // whatever's there if no public-host entry exists.
+  let fallback = null;
+  for (const filePath of candidates) {
+    if (!fs.existsSync(filePath)) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    } catch (_e) {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object") continue;
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!value || typeof value !== "object") continue;
+      const token = typeof value.oauth_token === "string" ? value.oauth_token : "";
+      if (!token) continue;
+      const host = String(key).split(":")[0];
+      if (host === "github.com") return token;
+      if (!fallback) fallback = token;
+    }
+  }
+  return fallback;
+}
+
+function copilotRequestHeaders(token) {
+  return {
+    Authorization: `token ${token}`,
+    Accept: "application/json",
+    "Editor-Version": "vscode/1.96.2",
+    "Editor-Plugin-Version": "copilot-chat/0.26.7",
+    "User-Agent": "GitHubCopilotChat/0.26.7",
+    "X-Github-Api-Version": "2025-04-01",
+  };
+}
+
+function copilotResetIso(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const trimmed = value.trim();
+  // Accept "YYYY-MM-DD" or full ISO timestamps
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(trimmed);
+  const ts = Date.parse(dateOnly ? `${trimmed}T00:00:00Z` : trimmed);
+  if (!Number.isFinite(ts)) return null;
+  return new Date(ts).toISOString();
+}
+
+function buildCopilotWindow(snapshot, resetIso) {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const entitlement = Number(snapshot.entitlement);
+  const remaining = Number(snapshot.remaining);
+  const percentRemaining = Number(snapshot.percent_remaining);
+  const allZero = (!entitlement || entitlement <= 0) && (!remaining || remaining <= 0) && (!percentRemaining || percentRemaining <= 0);
+  if (allZero) return null;
+  let usedPercent;
+  if (Number.isFinite(percentRemaining)) {
+    usedPercent = 100 - percentRemaining;
+  } else if (Number.isFinite(entitlement) && entitlement > 0 && Number.isFinite(remaining)) {
+    usedPercent = ((entitlement - remaining) / entitlement) * 100;
+  } else {
+    return null;
+  }
+  return buildWindow({ usedPercent, resetAt: resetIso });
+}
+
+function describeCopilotOtelStatus({ home, env = process.env } = {}) {
+  const resolvedHome = home || env.HOME || require("node:os").homedir();
+  const enabled = String(env.COPILOT_OTEL_ENABLED || "").toLowerCase() === "true";
+  const exporterType = String(env.COPILOT_OTEL_EXPORTER_TYPE || "").toLowerCase();
+  const explicitPath = typeof env.COPILOT_OTEL_FILE_EXPORTER_PATH === "string"
+    ? env.COPILOT_OTEL_FILE_EXPORTER_PATH
+    : "";
+  const defaultDir = path.join(resolvedHome, ".copilot", "otel");
+  let hasFiles = false;
+  try {
+    if (fs.existsSync(defaultDir)) {
+      hasFiles = fs.readdirSync(defaultDir).some((entry) => entry.endsWith(".jsonl"));
+    }
+  } catch (_e) {}
+  if (!hasFiles && explicitPath && fs.existsSync(explicitPath)) hasFiles = true;
+  return {
+    otel_enabled: enabled && (exporterType === "" || exporterType === "file"),
+    otel_exporter_type: exporterType || null,
+    otel_path: explicitPath || null,
+    otel_default_dir: defaultDir,
+    otel_has_files: hasFiles,
+  };
+}
+
+async function fetchCopilotLimits({ home, env = process.env, fetchImpl = fetch } = {}) {
+  const otel = describeCopilotOtelStatus({ home, env });
+  const token = readCopilotOauthToken({ home: home || (env.HOME || require("node:os").homedir()) });
+  if (!token) return { configured: false, ...otel };
+
+  try {
+    const res = await fetchImpl("https://api.github.com/copilot_internal/user", {
+      method: "GET",
+      headers: copilotRequestHeaders(token),
+    });
+    if (res.status === 401 || res.status === 403) {
+      throw new Error("GitHub Copilot token rejected. Re-authenticate via GitHub Copilot CLI/extension.");
+    }
+    if (!res.ok) {
+      throw new Error(`GitHub Copilot API error: HTTP ${res.status}`);
+    }
+    const json = await res.json();
+    const planName = typeof json?.copilot_plan === "string" && json.copilot_plan
+      ? json.copilot_plan.charAt(0).toUpperCase() + json.copilot_plan.slice(1)
+      : null;
+    const resetIso = copilotResetIso(json?.quota_reset_date);
+    const snapshots = json?.quota_snapshots || {};
+    const premiumWindow = buildCopilotWindow(snapshots.premium_interactions, resetIso);
+    const chatWindow = buildCopilotWindow(snapshots.chat, resetIso);
+
+    if (!premiumWindow && !chatWindow) {
+      return { configured: true, error: null, plan_name: planName, primary_window: null, secondary_window: null, ...otel };
+    }
+
+    return {
+      configured: true,
+      error: null,
+      plan_name: planName,
+      primary_window: premiumWindow,
+      secondary_window: chatWindow,
+      ...otel,
+    };
+  } catch (error) {
+    return { configured: true, error: error?.message || "Unknown error", ...otel };
+  }
+}
+
 function fetchKiroLimits({ commandRunner, now = new Date() } = {}) {
   if (!isBinaryAvailable("kiro-cli", { commandRunner })) {
     return { configured: false };
@@ -1072,7 +1214,7 @@ async function getUsageLimits({
     readCodexAccessToken({ home, env }),
   ]);
 
-  const [claudeResult, codexResult, cursor, gemini, kiro, antigravity] = await Promise.all([
+  const [claudeResult, codexResult, cursor, gemini, kiro, antigravity, copilot] = await Promise.all([
     claudeToken
       ? fetchClaudeUsageLimits(claudeToken, { fetchImpl }).then(
           (value) => ({ status: "fulfilled", value }),
@@ -1089,6 +1231,7 @@ async function getUsageLimits({
     fetchGeminiLimits({ home, env, fetchImpl, commandRunner }),
     Promise.resolve().then(() => fetchKiroLimits({ commandRunner, now })),
     fetchAntigravityLimits({ commandRunner, requestFn }),
+    fetchCopilotLimits({ home, env, fetchImpl }),
   ]);
 
   let claude;
@@ -1129,6 +1272,7 @@ async function getUsageLimits({
     gemini,
     kiro,
     antigravity,
+    copilot,
   };
 
   cache = { data, fetchedAt: nowMs };
@@ -1148,4 +1292,7 @@ module.exports = {
   normalizeAntigravityResponse,
   parseListeningPorts,
   detectAntigravityProcess,
+  fetchCopilotLimits,
+  readCopilotOauthToken,
+  describeCopilotOtelStatus,
 };

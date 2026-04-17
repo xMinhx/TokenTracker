@@ -12,6 +12,7 @@ const {
   parseOpencodeIncremental,
   parseKiroIncremental,
   parseHermesIncremental,
+  parseCopilotIncremental,
 } = require("../src/lib/rollout");
 
 test("parseRolloutIncremental skips duplicate token_count records (unchanged total_token_usage)", async () => {
@@ -2330,6 +2331,135 @@ test("parseHermesIncremental skips sessions with zero tokens", async () => {
     // The SQL WHERE clause already filters zero-token sessions, so 0 records returned
     assert.equal(result.recordsProcessed, 0);
     assert.equal(result.eventsAggregated, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── GitHub Copilot OTEL parser tests ──
+
+function writeCopilotOtelFile(filePath, spans) {
+  const lines = spans.map((s) => JSON.stringify(s));
+  require("node:fs").writeFileSync(filePath, lines.join("\n") + "\n", "utf8");
+}
+
+function makeCopilotChatSpan({
+  traceId = "trace-a",
+  spanId = "span-1",
+  endSeconds = 1775934260,
+  inputTokens = 1000,
+  outputTokens = 200,
+  cacheRead = 100,
+  cacheWrite = 0,
+  reasoning = 0,
+  model = "claude-sonnet-4",
+} = {}) {
+  return {
+    type: "span",
+    traceId,
+    spanId,
+    name: `chat ${model}`,
+    startTime: [endSeconds - 4, 0],
+    endTime: [endSeconds, 0],
+    attributes: {
+      "gen_ai.operation.name": "chat",
+      "gen_ai.request.model": model,
+      "gen_ai.response.model": model,
+      "gen_ai.usage.input_tokens": inputTokens,
+      "gen_ai.usage.output_tokens": outputTokens,
+      "gen_ai.usage.cache_read.input_tokens": cacheRead,
+      "gen_ai.usage.cache_write.input_tokens": cacheWrite,
+      "gen_ai.usage.reasoning.output_tokens": reasoning,
+    },
+  };
+}
+
+test("parseCopilotIncremental aggregates chat spans and subtracts cache from input", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
+  try {
+    const otelPath = path.join(tmp, "copilot-otel-1.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    writeCopilotOtelFile(otelPath, [
+      makeCopilotChatSpan({ traceId: "t1", spanId: "s1", inputTokens: 1000, outputTokens: 200, cacheRead: 100 }),
+      // Non-chat span — should be ignored
+      { type: "span", traceId: "t2", spanId: "s2", name: "tool execute", attributes: { "gen_ai.operation.name": "tool" } },
+    ]);
+
+    const result = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    assert.equal(result.eventsAggregated, 1);
+    assert.ok(result.bucketsQueued >= 1);
+
+    const queued = await readJsonLines(queuePath);
+    const copilotBuckets = queued.filter((b) => b.source === "copilot");
+    assert.equal(copilotBuckets.length, 1);
+    const b = copilotBuckets[0];
+    // OTEL input = 1000 includes cache_read 100 → input 900 + cached 100
+    assert.equal(b.input_tokens, 900);
+    assert.equal(b.output_tokens, 200);
+    assert.equal(b.cached_input_tokens, 100);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental dedups by traceId:spanId across runs", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
+  try {
+    const otelPath = path.join(tmp, "copilot-otel.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    writeCopilotOtelFile(otelPath, [
+      makeCopilotChatSpan({ traceId: "t1", spanId: "s1" }),
+    ]);
+
+    await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    // Re-parse same file — offset should skip already-seen content
+    const second = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    assert.equal(second.eventsAggregated, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental re-reads from start when file is rotated (inode change)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
+  try {
+    const otelPath = path.join(tmp, "copilot-otel.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    writeCopilotOtelFile(otelPath, [makeCopilotChatSpan({ traceId: "t1", spanId: "s1" })]);
+    const first = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    assert.equal(first.eventsAggregated, 1);
+
+    // Rotate: delete + recreate at same path with a new larger payload (different inode)
+    require("node:fs").unlinkSync(otelPath);
+    writeCopilotOtelFile(otelPath, [
+      makeCopilotChatSpan({ traceId: "t2", spanId: "s2", inputTokens: 5000 }),
+      makeCopilotChatSpan({ traceId: "t3", spanId: "s3", inputTokens: 5000 }),
+    ]);
+
+    const second = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    // Both new spans should be picked up despite the file being the "same" path
+    assert.equal(second.eventsAggregated, 2);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental returns zero when no OTEL files exist", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    const result = await parseCopilotIncremental({ otelPaths: [], cursors, queuePath, env: {} });
+    assert.equal(result.recordsProcessed, 0);
+    assert.equal(result.eventsAggregated, 0);
+    assert.equal(result.bucketsQueued, 0);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

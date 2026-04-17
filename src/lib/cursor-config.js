@@ -220,62 +220,61 @@ function fetchUrlRaw({ urlStr, cookie, timeoutMs }) {
 /**
  * Parse Cursor usage CSV into structured records.
  *
- * New format columns:
- *   Date, Kind, Model, Max Mode, Input (w/ Cache Write), Input (w/o Cache Write),
- *   Cache Read, Output Tokens, Total Tokens, Cost
+ * Column order has changed multiple times (e.g. new "Cloud Agent ID",
+ * "Automation ID" columns inserted before "Kind"). Resolve columns by
+ * header name instead of fixed index so the parser keeps working across
+ * future Cursor updates.
  *
- * Old format columns:
- *   Date, Model, Input (w/ Cache Write), Input (w/o Cache Write),
- *   Cache Read, Output Tokens, Total Tokens, Cost, Cost to you
+ * Known required columns: Date, Model, Input (w/ Cache Write),
+ * Input (w/o Cache Write), Cache Read, Output Tokens, Total Tokens, Cost.
+ * Optional: Kind, Max Mode.
  */
 function parseCursorCsv(csvText) {
   const lines = csvText.split("\n").filter((l) => l.trim().length > 0);
   if (lines.length < 2) return [];
 
-  const header = lines[0];
-  const isNewFormat = header.includes("Kind");
+  const headerFields = parseCsvLine(lines[0]).map((f) => stripQuotes(f));
+  const columnIndex = new Map();
+  for (let i = 0; i < headerFields.length; i++) {
+    columnIndex.set(headerFields[i], i);
+  }
+
+  const dateIdx = columnIndex.get("Date");
+  const modelIdx = columnIndex.get("Model");
+  const inputWithIdx = columnIndex.get("Input (w/ Cache Write)");
+  const inputWithoutIdx = columnIndex.get("Input (w/o Cache Write)");
+  const cacheReadIdx = columnIndex.get("Cache Read");
+  const outputIdx = columnIndex.get("Output Tokens");
+  const totalIdx = columnIndex.get("Total Tokens");
+  const costIdx = columnIndex.get("Cost");
+  const kindIdx = columnIndex.get("Kind");
+  const maxModeIdx = columnIndex.get("Max Mode");
+
+  const required = [dateIdx, modelIdx, inputWithIdx, inputWithoutIdx, cacheReadIdx, outputIdx, totalIdx, costIdx];
+  if (required.some((idx) => idx === undefined)) return [];
+
+  const minFields = Math.max(...required) + 1;
 
   const records = [];
   for (let i = 1; i < lines.length; i++) {
     const fields = parseCsvLine(lines[i]);
-    if (!fields || fields.length < 8) continue;
+    if (!fields || fields.length < minFields) continue;
 
-    let record;
-    if (isNewFormat) {
-      // Date,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens,Cost
-      const inputWithCache = toNum(fields[4]);
-      const inputWithoutCache = toNum(fields[5]);
-      record = {
-        date: stripQuotes(fields[0]),
-        kind: stripQuotes(fields[1]),
-        model: stripQuotes(fields[2]),
-        maxMode: stripQuotes(fields[3]),
-        inputTokens: inputWithoutCache,
-        cacheWriteTokens: Math.max(0, inputWithCache - inputWithoutCache),
-        cacheReadTokens: toNum(fields[6]),
-        outputTokens: toNum(fields[7]),
-        totalTokens: toNum(fields[8]),
-        cost: toFloat(fields[9]),
-      };
-    } else {
-      // Date,Model,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens,Cost,Cost to you
-      const inputWithCache = toNum(fields[2]);
-      const inputWithoutCache = toNum(fields[3]);
-      record = {
-        date: stripQuotes(fields[0]),
-        kind: "unknown",
-        model: stripQuotes(fields[1]),
-        maxMode: "No",
-        inputTokens: inputWithoutCache,
-        cacheWriteTokens: Math.max(0, inputWithCache - inputWithoutCache),
-        cacheReadTokens: toNum(fields[4]),
-        outputTokens: toNum(fields[5]),
-        totalTokens: toNum(fields[6]),
-        cost: toFloat(fields[7]),
-      };
-    }
+    const inputWithCache = toNum(fields[inputWithIdx]);
+    const inputWithoutCache = toNum(fields[inputWithoutIdx]);
+    const record = {
+      date: stripQuotes(fields[dateIdx]),
+      kind: kindIdx !== undefined ? stripQuotes(fields[kindIdx]) : "unknown",
+      model: stripQuotes(fields[modelIdx]),
+      maxMode: maxModeIdx !== undefined ? stripQuotes(fields[maxModeIdx]) : "No",
+      inputTokens: inputWithoutCache,
+      cacheWriteTokens: Math.max(0, inputWithCache - inputWithoutCache),
+      cacheReadTokens: toNum(fields[cacheReadIdx]),
+      outputTokens: toNum(fields[outputIdx]),
+      totalTokens: toNum(fields[totalIdx]),
+      cost: toFloat(fields[costIdx]),
+    };
 
-    // Skip records with no tokens
     if (record.totalTokens <= 0 && record.inputTokens <= 0 && record.outputTokens <= 0) continue;
 
     records.push(record);

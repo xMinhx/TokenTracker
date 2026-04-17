@@ -390,6 +390,11 @@ leaderboard.column.opencode,dashboard,LeaderboardPage,LeaderboardPage,column_ope
 leaderboard.column.openclaw,dashboard,LeaderboardPage,LeaderboardPage,column_openclaw,"OpenClaw",,active
 leaderboard.column.hermes,dashboard,LeaderboardPage,LeaderboardPage,column_hermes,"Hermes",,active
 leaderboard.column.kiro,dashboard,LeaderboardPage,LeaderboardPage,column_kiro,"Kiro",,active
+leaderboard.column.copilot,dashboard,LeaderboardPage,LeaderboardPage,column_copilot,"GitHub Copilot",,active
+limits.copilot.otelHint.title,dashboard,LimitsPage,LimitsPage,otel_hint_title,"Track Copilot token usage",,active
+limits.copilot.otelHint.body,dashboard,LimitsPage,LimitsPage,otel_hint_body,"Limits load via your GitHub OAuth token. To also record per-token usage, enable Copilot's OpenTelemetry export and add these lines to your shell profile (~/.zshrc or ~/.bashrc):",,active
+limits.copilot.otelHint.copy,dashboard,LimitsPage,LimitsPage,otel_hint_copy,"Copy",,active
+limits.copilot.otelHint.copied,dashboard,LimitsPage,LimitsPage,otel_hint_copied,"Copied",,active
 leaderboard.column.supplemental,dashboard,LeaderboardPage,LeaderboardPage,column_supplemental,"Supplemental",,active
 leaderboard.columns.reset,dashboard,LeaderboardPage,LeaderboardPage,columns_reset,"Reset columns",,active
 leaderboard.columns.reset_hint,dashboard,LeaderboardPage,LeaderboardPage,columns_reset_hint,"Restore default column order",,active

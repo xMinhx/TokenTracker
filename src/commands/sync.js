@@ -14,6 +14,7 @@ const {
   resolveKiroDbPath,
   resolveKiroJsonlPath,
   resolveHermesDbPath,
+  resolveCopilotOtelPaths,
   parseRolloutIncremental,
   parseClaudeIncremental,
   parseGeminiIncremental,
@@ -23,6 +24,7 @@ const {
   parseCursorApiIncremental,
   parseKiroIncremental,
   parseHermesIncremental,
+  parseCopilotIncremental,
 } = require("../lib/rollout");
 const { createProgress, renderBar, formatNumber, formatBytes } = require("../lib/progress");
 const {
@@ -38,6 +40,8 @@ const {
 const { purgeProjectUsage } = require("../lib/project-usage-purge");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const { resolveRuntimeConfig } = require("../lib/runtime-config");
+
+const CURSOR_UNKNOWN_MIGRATION_KEY = "cursorUnknownPurge_2026_04";
 
 async function cmdSync(argv) {
   const opts = parseArgs(argv);
@@ -259,6 +263,13 @@ async function cmdSync(argv) {
     }
 
     // ── Cursor (API-based) ──
+    // One-time migration: earlier CLI versions mis-parsed the Cursor CSV after
+    // Cursor inserted new "Cloud Agent ID"/"Automation ID" columns, writing
+    // cursor records under model="unknown". Purge those local buckets, emit
+    // zero retractions so the cloud upserts overwrite them to zero, and reset
+    // the incremental cursor so the fixed parser re-fetches all affected rows.
+    await migrateCursorUnknownBuckets({ cursors, queuePath });
+
     let cursorResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (isCursorInstalled({ home })) {
       const cursorAuth = extractCursorSessionToken({ home });
@@ -343,6 +354,28 @@ async function cmdSync(argv) {
       });
     }
 
+    // ── GitHub Copilot CLI (OTEL JSONL files) ──
+    let copilotResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const copilotPaths = resolveCopilotOtelPaths(process.env);
+    if (copilotPaths.length > 0) {
+      if (progress?.enabled) {
+        progress.start(`Parsing Copilot ${renderBar(0)} | buckets 0`);
+      }
+      copilotResult = await parseCopilotIncremental({
+        otelPaths: copilotPaths,
+        cursors,
+        queuePath,
+        env: process.env,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing Copilot ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
+    }
+
     if (cursors?.projectHourly?.projects && projectQueuePath && projectQueueStatePath) {
       for (const [projectKey, meta] of Object.entries(cursors.projectHourly.projects)) {
         if (!meta || typeof meta !== "object") continue;
@@ -419,7 +452,8 @@ async function cmdSync(argv) {
         opencodeResult.filesProcessed +
         cursorResult.recordsProcessed +
         kiroResult.recordsProcessed +
-        hermesResult.recordsProcessed;
+        hermesResult.recordsProcessed +
+        copilotResult.recordsProcessed;
       const totalBuckets =
         parseResult.bucketsQueued +
         openclawResult.bucketsQueued +
@@ -428,7 +462,8 @@ async function cmdSync(argv) {
         opencodeResult.bucketsQueued +
         cursorResult.bucketsQueued +
         kiroResult.bucketsQueued +
-        hermesResult.bucketsQueued;
+        hermesResult.bucketsQueued +
+        copilotResult.bucketsQueued;
       process.stdout.write(
         [
           "Sync finished:",
@@ -473,7 +508,7 @@ function parseArgs(argv) {
   return out;
 }
 
-module.exports = { cmdSync };
+module.exports = { cmdSync, migrateCursorUnknownBuckets, CURSOR_UNKNOWN_MIGRATION_KEY };
 
 function normalizeString(value) {
   if (typeof value !== "string") return null;
@@ -837,4 +872,47 @@ async function readQueueBatch(queuePath, startOffset, maxBuckets) {
   rl.close();
   stream.close?.();
   return { buckets: Array.from(bucketMap.values()), nextOffset: offset };
+}
+
+async function migrateCursorUnknownBuckets({ cursors, queuePath }) {
+  if (!cursors || typeof cursors !== "object") return;
+  cursors.migrations = cursors.migrations || {};
+  if (cursors.migrations[CURSOR_UNKNOWN_MIGRATION_KEY]) return;
+
+  const buckets = cursors.hourly?.buckets;
+  if (!buckets || typeof buckets !== "object") {
+    cursors.migrations[CURSOR_UNKNOWN_MIGRATION_KEY] = new Date().toISOString();
+    return;
+  }
+
+  const retractions = [];
+  for (const key of Object.keys(buckets)) {
+    if (!key.startsWith("cursor|unknown|")) continue;
+    const hourStart = key.split("|").slice(2).join("|");
+    retractions.push(
+      JSON.stringify({
+        source: "cursor",
+        model: "unknown",
+        hour_start: hourStart,
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: 0,
+        conversation_count: 0,
+      }),
+    );
+    delete buckets[key];
+  }
+
+  if (retractions.length > 0) {
+    await ensureDir(path.dirname(queuePath));
+    await fs.appendFile(queuePath, retractions.join("\n") + "\n");
+    if (cursors.cursorApi) {
+      cursors.cursorApi.lastRecordTimestamp = null;
+    }
+  }
+
+  cursors.migrations[CURSOR_UNKNOWN_MIGRATION_KEY] = new Date().toISOString();
 }

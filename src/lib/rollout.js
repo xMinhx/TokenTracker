@@ -2999,6 +2999,196 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
   return { recordsProcessed: rows.length, eventsAggregated, bucketsQueued };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GitHub Copilot CLI — OpenTelemetry JSONL exporter
+// User must opt in by setting:
+//   COPILOT_OTEL_ENABLED=true
+//   COPILOT_OTEL_EXPORTER_TYPE=file
+//   COPILOT_OTEL_FILE_EXPORTER_PATH=$HOME/.copilot/otel/copilot-otel-...jsonl
+// We scan the default directory plus the env-overridden path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveCopilotOtelPaths(env = process.env) {
+  const home = require("node:os").homedir();
+  const paths = new Set();
+  const defaultDir = path.join(home, ".copilot", "otel");
+  if (fssync.existsSync(defaultDir)) {
+    try {
+      for (const entry of fssync.readdirSync(defaultDir)) {
+        if (entry.endsWith(".jsonl")) paths.add(path.join(defaultDir, entry));
+      }
+    } catch (_e) {}
+  }
+  const explicit = env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+  if (typeof explicit === "string" && explicit.trim() && fssync.existsSync(explicit)) {
+    paths.add(explicit);
+  }
+  return Array.from(paths).sort();
+}
+
+function isCopilotChatSpan(record) {
+  if (!record || record.type !== "span") return false;
+  const opName = record?.attributes?.["gen_ai.operation.name"];
+  if (opName === "chat") return true;
+  if (typeof record.name === "string" && record.name.startsWith("chat ")) return true;
+  return false;
+}
+
+function copilotOtelTimeToMs(value) {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const seconds = Number(value[0]);
+  const nanos = Number(value[1]);
+  if (!Number.isFinite(seconds)) return null;
+  const ns = Number.isFinite(nanos) ? nanos : 0;
+  return Math.round(seconds * 1000 + ns / 1_000_000);
+}
+
+function pickCopilotModel(attrs) {
+  const candidates = [attrs?.["gen_ai.response.model"], attrs?.["gen_ai.request.model"]];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+  return null;
+}
+
+async function parseCopilotIncremental({ otelPaths, cursors, queuePath, onProgress, env } = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const copilotState = cursors.copilot && typeof cursors.copilot === "object" ? cursors.copilot : {};
+  const seenIds = new Set(Array.isArray(copilotState.seenIds) ? copilotState.seenIds : []);
+  const fileOffsets =
+    copilotState.fileOffsets && typeof copilotState.fileOffsets === "object"
+      ? { ...copilotState.fileOffsets }
+      : {};
+
+  const files = Array.isArray(otelPaths) && otelPaths.length > 0
+    ? otelPaths
+    : resolveCopilotOtelPaths(env || process.env);
+  if (files.length === 0) {
+    cursors.copilot = { ...copilotState, seenIds: Array.from(seenIds), fileOffsets, updatedAt: new Date().toISOString() };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try {
+      stat = fssync.statSync(filePath);
+    } catch (_e) {
+      continue;
+    }
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    // Re-read from start if (a) file shrunk (truncate/rewrite in place) or
+    // (b) inode changed (rotator deleted + recreated at same path). Without
+    // the inode check, a rotator producing a same-or-larger file would leave
+    // the old offset stuck and skip the new file's prefix forever.
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+    if (stat.size <= startOffset) continue;
+
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset });
+    } catch (_e) {
+      continue;
+    }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let record;
+      try {
+        record = JSON.parse(line);
+      } catch (_e) {
+        continue;
+      }
+      recordsProcessed++;
+      if (!isCopilotChatSpan(record)) continue;
+
+      const traceId = record?.traceId || "";
+      const spanId = record?.spanId || "";
+      const dedupKey = traceId && spanId ? `${traceId}:${spanId}` : null;
+      if (dedupKey && seenIds.has(dedupKey)) continue;
+
+      const attrs = record.attributes || {};
+      const inputRaw = toNonNegativeInt(attrs["gen_ai.usage.input_tokens"]);
+      const output = toNonNegativeInt(attrs["gen_ai.usage.output_tokens"]);
+      const cacheRead = toNonNegativeInt(attrs["gen_ai.usage.cache_read.input_tokens"]);
+      const cacheWrite = toNonNegativeInt(attrs["gen_ai.usage.cache_write.input_tokens"]);
+      const reasoning = toNonNegativeInt(attrs["gen_ai.usage.reasoning.output_tokens"]);
+      // OTEL input_tokens INCLUDES cache_read — subtract per project convention
+      const cacheReadClamped = Math.min(cacheRead, inputRaw);
+      const input = Math.max(0, inputRaw - cacheReadClamped);
+      const totalInteresting = input + output + cacheReadClamped + cacheWrite + reasoning;
+      // Drop empty rows unless cache-only
+      if (totalInteresting === 0) continue;
+
+      const tsMs = copilotOtelTimeToMs(record.endTime) || copilotOtelTimeToMs(record.startTime);
+      if (!tsMs) continue;
+      const tsIso = new Date(tsMs).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const model = normalizeModelInput(pickCopilotModel(attrs)) || "github-copilot";
+
+      const delta = {
+        input_tokens: input,
+        cached_input_tokens: cacheReadClamped,
+        cache_creation_input_tokens: cacheWrite,
+        output_tokens: output,
+        reasoning_output_tokens: reasoning,
+        total_tokens: input + output + cacheReadClamped + cacheWrite + reasoning,
+        conversation_count: 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "copilot", model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("copilot", model, bucketStart));
+      eventsAggregated++;
+      if (dedupKey) seenIds.add(dedupKey);
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    // Re-stat after readline drains: file may have been appended during the
+    // parse loop. Without this, those new lines would be replayed next run
+    // (dedup catches records with traceId+spanId, but spans missing either
+    // would be double-counted).
+    let postStat = stat;
+    try {
+      postStat = fssync.statSync(filePath);
+    } catch (_e) {}
+    fileOffsets[filePath] = { size: postStat.size, mtimeMs: postStat.mtimeMs, ino: postStat.ino };
+  }
+
+  // Cap dedup set to last 10k IDs to bound state size
+  const seenArr = Array.from(seenIds);
+  const cappedSeen = seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.copilot = { ...copilotState, seenIds: cappedSeen, fileOffsets, updatedAt };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
 module.exports = {
   listRolloutFiles,
   listClaudeProjectFiles,
@@ -3008,6 +3198,7 @@ module.exports = {
   resolveKiroDbPath,
   resolveKiroJsonlPath,
   resolveHermesDbPath,
+  resolveCopilotOtelPaths,
   parseRolloutIncremental,
   parseClaudeIncremental,
   parseGeminiIncremental,
@@ -3017,4 +3208,5 @@ module.exports = {
   parseCursorApiIncremental,
   parseKiroIncremental,
   parseHermesIncremental,
+  parseCopilotIncremental,
 };

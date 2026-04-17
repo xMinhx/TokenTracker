@@ -284,6 +284,15 @@ enum WidgetSnapshotWriter {
             }
         }
 
+        // GitHub Copilot
+        if let copilot = limits.copilot, copilot.configured {
+            if let w = copilot.primaryWindow {
+                out.append(LimitProvider(source: "copilot", label: "Copilot",
+                                         fraction: w.usedPercent / 100.0,
+                                         resetsAt: parseISO(w.resetAt)))
+            }
+        }
+
         return out
     }
 
