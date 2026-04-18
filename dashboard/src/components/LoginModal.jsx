@@ -105,7 +105,14 @@ export function LoginModal() {
 
   const redirectUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
-    return window.location.origin + "/";
+    // In the macOS app WebView, route OAuth back through /auth/callback so
+    // NativeAuthCallbackPage can detect the native flag and bounce the code
+    // into the app via the tokentracker:// URL scheme. Plain web visitors
+    // can land directly on / since the SDK auto-exchanges insforge_code.
+    const isNativeContext = Boolean(window.webkit?.messageHandlers?.nativeOAuth);
+    return isNativeContext
+      ? `${window.location.origin}/auth/callback`
+      : `${window.location.origin}/`;
   }, []);
 
   const handleOAuth = useCallback(async (provider) => {

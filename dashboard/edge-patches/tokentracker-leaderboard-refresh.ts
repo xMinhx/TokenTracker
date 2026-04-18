@@ -151,8 +151,12 @@ function computeDateRange(period: Period): DateRange {
       .slice(0, 10);
     return { from_day, to_day };
   }
-  // total
-  return { from_day: "2024-01-01", to_day: now.toISOString().slice(0, 10) };
+  // total — capped to a rolling 90-day window so we don't re-scan the entire
+  // hourly table on every refresh (Egress dominates with the unbounded range).
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const start = new Date(end);
+  start.setUTCDate(end.getUTCDate() - 89);
+  return { from_day: start.toISOString().slice(0, 10), to_day: end.toISOString().slice(0, 10) };
 }
 
 interface HourlyRow {

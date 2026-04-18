@@ -24,11 +24,15 @@ async function triggerLeaderboardRefresh(accessToken: string): Promise<void> {
     Authorization: `Bearer ${accessToken}`,
   };
   if (anon) headers.apikey = anon;
+  // Per-sync refresh is week-only. Month/Total scan tens of thousands of
+  // hourly rows each call and burn InsForge Egress (~5 MB per full refresh
+  // every 5 min per active user blew through the 5 GB plan). A scheduled
+  // job covers the slower-moving month/total snapshots.
   try {
     await fetch(`${root}/functions/tokentracker-leaderboard-refresh`, {
       method: "POST",
       headers,
-      body: "{}",
+      body: JSON.stringify({ period: "week" }),
     });
   } catch { /* best effort */ }
 }
