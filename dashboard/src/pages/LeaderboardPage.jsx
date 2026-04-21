@@ -175,10 +175,11 @@ function GithubLinkWithTooltip({ githubUrl }) {
         //  3. ::before bridge extends the tooltip's hit-area down to the
         //     icon's top edge so the cursor's path from icon up into the
         //     tooltip text stays inside the group the whole time.
-        // mb-2 creates the visual 8px gap users expect; ::before h-2.5 (10px)
-        // bridges that gap for hit-testing so the cursor never leaves the
-        // group while moving from icon into the tooltip.
-        className="invisible opacity-0 group-hover/gh:visible group-hover/gh:opacity-100 absolute left-0 bottom-full mb-2 whitespace-nowrap rounded-md bg-oai-black dark:bg-oai-gray-700 px-2.5 py-1.5 text-[11px] text-white shadow-lg transition-opacity duration-150 z-50 before:content-[''] before:absolute before:inset-x-0 before:top-full before:h-2.5"
+        // right-0 so the tooltip grows leftward from the icon (icon now sits
+        // on the right side of the cell after the name). mb-2 gives an 8px
+        // visual gap; ::before h-2.5 (10px) bridges it for hit-testing so the
+        // cursor never leaves the group while moving from icon into tooltip.
+        className="invisible opacity-0 group-hover/gh:visible group-hover/gh:opacity-100 absolute right-0 bottom-full mb-2 whitespace-nowrap rounded-md bg-oai-black dark:bg-oai-gray-700 px-2.5 py-1.5 text-[11px] text-white shadow-lg transition-opacity duration-150 z-50 before:content-[''] before:absolute before:inset-x-0 before:top-full before:h-2.5"
       >
         {copy("leaderboard.github.tooltipPrefix")}{" "}
         <Link
@@ -462,9 +463,8 @@ export function LeaderboardPage({
                           displayName={name}
                           seed={leaderboardAvatarSeed(entry, name)}
                         />
-                    
                         <span className="truncate font-semibold text-oai-black dark:text-oai-white">{name}</span>
-                            {entry?.github_url && <GithubLinkWithTooltip githubUrl={entry.github_url} />}
+                        {entry?.github_url && <GithubLinkWithTooltip githubUrl={entry.github_url} />}
                       </div>
                     </td>
                     <td className="px-4 py-4 font-medium text-oai-black dark:text-oai-white whitespace-nowrap text-right tabular-nums bg-oai-brand-50 dark:bg-oai-brand-900/10">
@@ -487,14 +487,14 @@ export function LeaderboardPage({
                     <RankCell rank={entry?.rank} placeholder={placeholder} />
                   </td>
                   <td className={lbStickyTdUser(false)}>
-                    <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
                       <LeaderboardAvatar
                         avatarUrl={entry?.avatar_url}
                         displayName={name}
                         seed={leaderboardAvatarSeed(entry, name)}
                       />
-                      {entry?.github_url && <GithubLinkWithTooltip githubUrl={entry.github_url} />}
                       <span className="truncate font-medium text-oai-gray-800 dark:text-oai-gray-200">{name}</span>
+                      {entry?.github_url && <GithubLinkWithTooltip githubUrl={entry.github_url} />}
                     </div>
                   </td>
                   <td className="px-4 py-4 font-semibold text-oai-gray-800 dark:text-oai-gray-200 whitespace-nowrap text-right tabular-nums bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60">
