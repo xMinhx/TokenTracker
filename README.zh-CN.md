@@ -76,6 +76,31 @@ brew install mm7894215/tokentracker/tokentracker
 
 ---
 
+## 🤖 已支持的 Provider（17 个）
+
+<p align="center">
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/claude-code.svg" width="48" height="48" alt="Claude Code" title="Claude Code"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/codex.svg" width="48" height="48" alt="Codex CLI" title="Codex CLI"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/cursor.svg" width="48" height="48" alt="Cursor" title="Cursor"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/gemini.svg" width="48" height="48" alt="Gemini CLI" title="Gemini CLI"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/antigravity.svg" width="48" height="48" alt="Antigravity" title="Antigravity"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/kiro.svg" width="48" height="48" alt="Kiro" title="Kiro"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/opencode.svg" width="48" height="48" alt="OpenCode" title="OpenCode"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/openclaw.svg" width="48" height="48" alt="OpenClaw" title="OpenClaw"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/every-code.svg" width="48" height="48" alt="Every Code" title="Every Code"></a>
+  <br><br>
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/hermes.svg" width="48" height="48" alt="Hermes Agent" title="Hermes Agent"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/copilot.svg" width="48" height="48" alt="GitHub Copilot" title="GitHub Copilot"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/kimi.svg" width="48" height="48" alt="Kimi Code" title="Kimi Code"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/codebuddy.svg" width="48" height="48" alt="CodeBuddy" title="CodeBuddy"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/grok.svg" width="48" height="48" alt="Grok Build" title="Grok Build"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/oh-my-pi.svg" width="48" height="48" alt="oh-my-pi" title="oh-my-pi"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/kilo.svg" width="48" height="48" alt="Kilo CLI" title="Kilo CLI"></a>&nbsp;&nbsp;
+  <a href="#-已支持的-ai-工具"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/kilo-code.svg" width="48" height="48" alt="Kilo Code" title="Kilo Code"></a>
+</p>
+
+---
+
 ## ✨ 特性
 
 - 🔌 **开箱即用支持 17 款 AI 工具** —— Claude Code、Codex CLI、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、Grok Build、oh-my-pi、Kilo CLI、Kilo Code、Antigravity

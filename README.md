@@ -6,7 +6,7 @@
 
 ### Know exactly what you're spending on AI — across every CLI
 
-Auto-collect token counts from **13 AI coding tools**, aggregate them locally, and see real cost trends in a beautiful dashboard. No cloud account, no API keys, no setup — just one command.
+Auto-collect token counts from **17 AI coding tools**, aggregate them locally, and see real cost trends in a beautiful dashboard. No cloud account, no API keys, no setup — just one command.
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -76,9 +76,34 @@ Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap 
 
 ---
 
+## 🤖 Supported providers (17)
+
+<p align="center">
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/claude-code.svg" width="48" height="48" alt="Claude Code" title="Claude Code"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/codex.svg" width="48" height="48" alt="Codex CLI" title="Codex CLI"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/cursor.svg" width="48" height="48" alt="Cursor" title="Cursor"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/gemini.svg" width="48" height="48" alt="Gemini CLI" title="Gemini CLI"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/antigravity.svg" width="48" height="48" alt="Antigravity" title="Antigravity"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/kiro.svg" width="48" height="48" alt="Kiro" title="Kiro"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/opencode.svg" width="48" height="48" alt="OpenCode" title="OpenCode"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/openclaw.svg" width="48" height="48" alt="OpenClaw" title="OpenClaw"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/every-code.svg" width="48" height="48" alt="Every Code" title="Every Code"></a>
+  <br><br>
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/hermes.svg" width="48" height="48" alt="Hermes Agent" title="Hermes Agent"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/copilot.svg" width="48" height="48" alt="GitHub Copilot" title="GitHub Copilot"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/kimi.svg" width="48" height="48" alt="Kimi Code" title="Kimi Code"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/codebuddy.svg" width="48" height="48" alt="CodeBuddy" title="CodeBuddy"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/grok.svg" width="48" height="48" alt="Grok Build" title="Grok Build"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/oh-my-pi.svg" width="48" height="48" alt="oh-my-pi" title="oh-my-pi"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/kilo.svg" width="48" height="48" alt="Kilo CLI" title="Kilo CLI"></a>&nbsp;&nbsp;
+  <a href="#-supported-ai-tools"><img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/dashboard/public/brand-logos/kilo-code.svg" width="48" height="48" alt="Kilo Code" title="Kilo Code"></a>
+</p>
+
+---
+
 ## ✨ Features
 
-- 🔌 **16 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, Grok Build, oh-my-pi, Kilo CLI, Kilo Code
+- 🔌 **17 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Antigravity, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, Grok Build, oh-my-pi, Kilo CLI, Kilo Code
 - 🏠 **100% local** — Token data never leaves your machine. No account, no API keys.
 - 🚀 **Zero config** — Hooks auto-install on first run. From zero to dashboard in 30 seconds.
 - 📊 **Beautiful dashboard** — Usage trends, cost breakdowns by model, GitHub-style activity heatmap, project attribution
