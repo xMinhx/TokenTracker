@@ -39,7 +39,7 @@ export default function IpCheckPage() {
         </div>
       )}
       <iframe
-        src="https://ip.net.coffee/claude/"
+        src="/proxy/ipcheck/claude/"
         title="Cloud AI IP Check"
         className={`w-full h-full dark:invert dark:hue-rotate-180 transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
         style={{ border: "none" }}

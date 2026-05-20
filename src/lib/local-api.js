@@ -635,6 +635,30 @@ function json(res, data, status) {
 }
 
 // ---------------------------------------------------------------------------
+// IP check proxy (issue #81): ip.net.coffee/claude/ sets X-Frame-Options:
+// SAMEORIGIN so the dashboard iframe is blocked. We reverse-proxy through
+// /proxy/ipcheck/* so requests stay same-origin to 127.0.0.1, then strip the
+// embedding-hostile headers and rewrite root-relative URLs in HTML so the
+// page's own /api/* and /claude/* fetches route back through us.
+// ---------------------------------------------------------------------------
+
+const IP_CHECK_PROXY_PREFIX = "/proxy/ipcheck";
+const IP_CHECK_TARGET = "https://ip.net.coffee";
+
+function rewriteIpCheckHtml(html) {
+  const prefix = IP_CHECK_PROXY_PREFIX;
+  return html
+    .replace(
+      /(\s(?:href|src|action)\s*=\s*["'])\/(?!\/|proxy\/ipcheck\/)/g,
+      `$1${prefix}/`,
+    )
+    .replace(
+      /(fetch\s*\(\s*["'`])\/(?!\/|proxy\/ipcheck\/)/g,
+      `$1${prefix}/`,
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Main handler factory
 // ---------------------------------------------------------------------------
 
@@ -868,6 +892,66 @@ function createLocalApiHandler({ queuePath }) {
         res.end(resBody);
       } catch (e) {
         json(res, { error: `Auth proxy error: ${e?.message || e}` }, 502);
+      }
+      return true;
+    }
+
+    // --- ip-check proxy: reverse-proxy ip.net.coffee/claude/ (issue #81) ---
+    if (p.startsWith(`${IP_CHECK_PROXY_PREFIX}/`) || p === IP_CHECK_PROXY_PREFIX) {
+      const targetPath = p === IP_CHECK_PROXY_PREFIX
+        ? "/"
+        : p.slice(IP_CHECK_PROXY_PREFIX.length) || "/";
+      const targetUrl = `${IP_CHECK_TARGET}${targetPath}${url.search || ""}`;
+      try {
+        const proxyHeaders = {};
+        for (const [key, value] of Object.entries(req.headers)) {
+          const lk = key.toLowerCase();
+          if (["host", "connection", "referer", "origin"].includes(lk)) continue;
+          proxyHeaders[key] = value;
+        }
+        proxyHeaders["host"] = "ip.net.coffee";
+        proxyHeaders["referer"] = `${IP_CHECK_TARGET}${targetPath}`;
+
+        const method = String(req.method || "GET").toUpperCase();
+        let body;
+        if (method !== "GET" && method !== "HEAD") {
+          const chunks = [];
+          for await (const chunk of req) chunks.push(chunk);
+          if (chunks.length > 0) body = Buffer.concat(chunks);
+        }
+
+        const proxyRes = await fetch(targetUrl, {
+          method,
+          headers: proxyHeaders,
+          body,
+          redirect: "manual",
+        });
+
+        const stripped = new Set([
+          "transfer-encoding",
+          "connection",
+          "content-length",
+          "content-encoding",
+          "x-frame-options",
+          "content-security-policy",
+          "cross-origin-opener-policy",
+          "cross-origin-embedder-policy",
+          "cross-origin-resource-policy",
+        ]);
+        const responseHeaders = [...proxyRes.headers.entries()].filter(
+          ([k]) => !stripped.has(k.toLowerCase()),
+        );
+
+        const contentType = proxyRes.headers.get("content-type") || "";
+        let resBody = Buffer.from(await proxyRes.arrayBuffer());
+        if (contentType.toLowerCase().includes("text/html")) {
+          resBody = Buffer.from(rewriteIpCheckHtml(resBody.toString("utf8")), "utf8");
+        }
+
+        res.writeHead(proxyRes.status, Object.fromEntries(responseHeaders));
+        res.end(resBody);
+      } catch (e) {
+        json(res, { error: `IP check proxy error: ${e?.message || e}` }, 502);
       }
       return true;
     }

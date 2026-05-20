@@ -116,7 +116,11 @@ async function cmdServe(argv) {
       }
 
       // API routes
-      if (url.pathname.startsWith("/functions/") || url.pathname.startsWith("/api/")) {
+      if (
+        url.pathname.startsWith("/functions/")
+        || url.pathname.startsWith("/api/")
+        || url.pathname.startsWith("/proxy/")
+      ) {
         const handled = await handleApi(req, res, url);
         if (handled) return;
       }
