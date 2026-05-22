@@ -175,6 +175,12 @@ function aggregateByDay(rows, timeZoneContext = null) {
     a.cache_creation_input_tokens += row.cache_creation_input_tokens || 0;
     a.reasoning_output_tokens += row.reasoning_output_tokens || 0;
     a.conversation_count += row.conversation_count || 0;
+
+    if (!a.models) {
+      a.models = {};
+    }
+    const model = row.model || "unknown";
+    a.models[model] = (a.models[model] || 0) + (row.total_tokens || 0);
   }
   return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
 }
@@ -999,6 +1005,17 @@ function createLocalApiHandler({ queuePath }) {
       return true;
     }
 
+    // --- wrapped (year-end summary, à la Spotify Wrapped) ---
+    if (p === "/functions/tokentracker-wrapped") {
+      const yearParam = url.searchParams.get("year");
+      const year = yearParam ? Number(yearParam) : null;
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
+      const { aggregateWrapped } = require("./wrapped-aggregator");
+      const summary = aggregateWrapped(rows, year ? { year } : {});
+      json(res, { scope, excluded_sources: excludedSources, ...summary });
+      return true;
+    }
+
     // --- usage-summary ---
     if (p === "/functions/tokentracker-usage-summary") {
       const from = url.searchParams.get("from") || "";
@@ -1111,14 +1128,32 @@ function createLocalApiHandler({ queuePath }) {
         const day = cursor.toISOString().slice(0, 10);
         const data = byDay.get(day);
         const billable = data?.billable_total_tokens || 0;
-        cells.push({ day, total_tokens: data?.total_tokens || 0, billable_total_tokens: billable, level: calcLevel(billable) });
+        cells.push({ day, total_tokens: data?.total_tokens || 0, billable_total_tokens: billable, level: calcLevel(billable), models: data?.models || null });
         cursor.setUTCDate(cursor.getUTCDate() + 1);
       }
       const weeksArr = [];
       for (let i = 0; i < cells.length; i += 7) {
         weeksArr.push(cells.slice(i, i + 7));
       }
-      json(res, { from, to, scope, excluded_sources: excludedSources, week_starts_on: "sun", active_days: cells.filter((c) => c.billable_total_tokens > 0).length, streak_days: 0, weeks: weeksArr });
+
+      let totalCostUsd = 0;
+      for (const d of daily) {
+        if (d.day >= from && d.day <= to) {
+          totalCostUsd += d.total_cost_usd || 0;
+        }
+      }
+
+      json(res, { 
+        from, 
+        to, 
+        scope, 
+        excluded_sources: excludedSources, 
+        week_starts_on: "sun", 
+        active_days: cells.filter((c) => c.billable_total_tokens > 0).length, 
+        streak_days: 0, 
+        weeks: weeksArr,
+        total_cost_usd: totalCostUsd
+      });
       return true;
     }
 
