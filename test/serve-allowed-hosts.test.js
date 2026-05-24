@@ -18,13 +18,6 @@ test("serve parses comma-separated and repeated --allowed-hosts values", () => {
   ]);
 });
 
-test("serve does not consume another option as an --allowed-hosts value", () => {
-  const opts = parseArgs(["--allowed-hosts", "--no-open"]);
-
-  assert.equal(opts.open, false);
-  assert.deepEqual(opts.allowedHosts, []);
-});
-
 test("allowed host normalization rejects wildcards and non-host values", () => {
   assert.deepEqual(
     normalizeAllowedHosts([

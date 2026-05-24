@@ -278,7 +278,7 @@ function parseArgs(argv) {
     if (arg === "--port" && i + 1 < argv.length) {
       const n = parseInt(argv[++i], 10);
       if (Number.isFinite(n) && n > 0 && n < 65536) opts.port = n;
-    } else if (arg === "--allowed-hosts" && i + 1 < argv.length && !argv[i + 1].startsWith("-")) {
+    } else if (arg === "--allowed-hosts" && i + 1 < argv.length) {
       opts.allowedHosts.push(...normalizeAllowedHosts(argv[++i]));
     } else if (arg.startsWith("--allowed-hosts=")) {
       opts.allowedHosts.push(...normalizeAllowedHosts(arg.slice("--allowed-hosts=".length)));
