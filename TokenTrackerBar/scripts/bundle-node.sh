@@ -13,7 +13,20 @@ set -euo pipefail
 #   ./bundle-node.sh --clean      # wipe EmbeddedServer/
 # ──────────────────────────────────────────────
 
-NODE_VERSION="22.22.2"
+# Pinned Node.js version. Any bump must come paired with running
+# `npm test` against the new undici (the version Node 22+ bundles), since
+# Node minor releases regularly tighten undici header validation — e.g. the
+# 22.14 → 22.22 bump turned every POST /api/auth/* into 502 by promoting
+# Content-Length to a forbidden request header (see v0.24.5 release notes).
+EXPECTED_NODE_VERSION="22.22.2"
+NODE_VERSION="${NODE_VERSION:-$EXPECTED_NODE_VERSION}"
+if [[ "$NODE_VERSION" != "$EXPECTED_NODE_VERSION" ]]; then
+  echo "❌ Refusing to bundle Node.js v${NODE_VERSION}; expected pinned v${EXPECTED_NODE_VERSION}." >&2
+  echo "   Update EXPECTED_NODE_VERSION in this script after running npm test" >&2
+  echo "   against the new Node so undici-regression cases (e.g. auth-relay" >&2
+  echo "   forbidden headers) are still caught by CI." >&2
+  exit 1
+fi
 TARGET_ARCH="universal"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -77,7 +90,12 @@ else
 fi
 
 chmod +x "$EMBED_DIR/node"
-echo "✅ Node.js binary ready ($TARGET_ARCH)"
+BUNDLED_NODE_VERSION="$("$EMBED_DIR/node" -p 'process.versions.node' 2>/dev/null || echo unknown)"
+if [[ "$BUNDLED_NODE_VERSION" != "$EXPECTED_NODE_VERSION" ]]; then
+  echo "❌ Bundled Node drifted: expected v${EXPECTED_NODE_VERSION}, got v${BUNDLED_NODE_VERSION}" >&2
+  exit 1
+fi
+echo "✅ Node.js binary ready ($TARGET_ARCH) — v${BUNDLED_NODE_VERSION}"
 file "$EMBED_DIR/node"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

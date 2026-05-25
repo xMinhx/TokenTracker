@@ -653,6 +653,67 @@ function json(res, data, status) {
 const IP_CHECK_PROXY_PREFIX = "/proxy/ipcheck";
 const IP_CHECK_TARGET = "https://ip.net.coffee";
 
+// HTTP hop-by-hop headers (RFC 7230 §6.1) plus headers undici/fetch manages
+// internally. Forwarding any of these to `fetch(...)` either silently breaks
+// the request (host being wrong) or, on stricter undici versions like the
+// 6.24.1 shipped with Node 22.22.2, throws UND_ERR_INVALID_ARG and turns
+// every proxied POST into a 502. Keep this set authoritative for every
+// reverse-proxy site in this module.
+const HOP_BY_HOP_HEADERS = new Set([
+  "host",
+  "connection",
+  "keep-alive",
+  "content-length",
+  "transfer-encoding",
+  "upgrade",
+  "proxy-authorization",
+  "proxy-authenticate",
+  "proxy-connection",
+  "te",
+  "trailer",
+  "trailers",
+]);
+
+// Strip forbidden + hop-by-hop headers when forwarding an inbound request to
+// fetch(). Honours the Connection header's named-headers list (RFC 7230 §6.1)
+// so values like `Connection: keep-alive, x-custom` also drop x-custom.
+function buildProxyHeaders(headers) {
+  const entries =
+    headers && typeof headers.entries === "function"
+      ? Array.from(headers.entries())
+      : Object.entries(headers || {});
+
+  const connectionNamed = new Set();
+  const normalized = [];
+  for (const [rawKey, rawValue] of entries) {
+    if (rawValue == null) continue;
+    const key = String(rawKey).toLowerCase();
+    normalized.push([key, rawValue]);
+    if (key === "connection") {
+      const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+      for (const v of values) {
+        String(v)
+          .split(",")
+          .map((part) => part.trim().toLowerCase())
+          .filter(Boolean)
+          .forEach((part) => connectionNamed.add(part));
+      }
+    }
+  }
+
+  const out = {};
+  for (const [key, rawValue] of normalized) {
+    if (HOP_BY_HOP_HEADERS.has(key) || connectionNamed.has(key)) continue;
+    if (Array.isArray(rawValue)) {
+      const joined = rawValue.filter((e) => e != null).map(String).join(", ");
+      if (joined) out[key] = joined;
+      continue;
+    }
+    out[key] = String(rawValue);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Main handler factory
 // ---------------------------------------------------------------------------
@@ -880,23 +941,7 @@ function createLocalApiHandler({ queuePath }) {
       const insforgeBase = runtime.baseUrl || DEFAULT_BASE_URL;
       try {
         const targetUrl = `${insforgeBase.replace(/\/$/, "")}${p}${url.search || ""}`;
-        const proxyHeaders = {};
-        for (const [key, value] of Object.entries(req.headers)) {
-          // Skip headers undici/fetch manages internally. Forwarding the
-          // inbound content-length (which describes the request body received
-          // here, not what we're about to send) causes undici to throw
-          // UND_ERR_INVALID_ARG "invalid content-length header" on every POST,
-          // turning every /api/auth/* mutation into a 502 — bug present since
-          // this relay was introduced and surfaced after Node updates made
-          // undici stricter about forbidden headers.
-          if (
-            key === "host" ||
-            key === "connection" ||
-            key === "content-length" ||
-            key === "transfer-encoding"
-          ) continue;
-          proxyHeaders[key] = value;
-        }
+        const proxyHeaders = buildProxyHeaders(req.headers);
         const hasClientCookie = normalizeCookieHeader(proxyHeaders["cookie"]).trim().length > 0;
         const hasCsrfHeader = typeof proxyHeaders["x-csrf-token"] === "string" && proxyHeaders["x-csrf-token"].trim().length > 0;
         const relayCsrfToken = getRelayCookieValue(csrfRelayCookieName);
@@ -1013,9 +1058,11 @@ function createLocalApiHandler({ queuePath }) {
       const targetUrl = `${IP_CHECK_TARGET}${targetPath}${url.search || ""}`;
       try {
         // Whitelist forwarded headers — no cookies, no auth, no fingerprintable
-        // identity. Only what the upstream needs to negotiate content.
+        // identity. Only what the upstream needs to negotiate content. Do not
+        // set `host` explicitly: undici derives it from the URL, and some
+        // versions reject a manual host header on fetch() (same forbidden-
+        // header family that broke /api/auth/* in 5/13).
         const proxyHeaders = {
-          host: "ip.net.coffee",
           accept: req.headers["accept"] || "*/*",
           "accept-language": req.headers["accept-language"] || "en",
           "accept-encoding": req.headers["accept-encoding"] || "gzip",
