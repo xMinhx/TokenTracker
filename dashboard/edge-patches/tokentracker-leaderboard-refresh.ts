@@ -24,6 +24,12 @@ function logRefreshEvent(event: Record<string, unknown>) {
 
 type Period = "week" | "month" | "total";
 const ALL_PERIODS: Period[] = ["week", "month", "total"];
+const BLOCKED_LEADERBOARD_USER_IDS = new Set(
+  (Deno.env.get("LEADERBOARD_BLOCKED_USER_IDS") ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean),
+);
 
 /** Per-model pricing (USD per million tokens), synced from local-api.js */
 const MODEL_PRICING: Record<string, { input: number; output: number; cache_read: number; cache_write?: number }> = {
@@ -466,6 +472,9 @@ export default async function (req: Request): Promise<Response> {
       (agg as unknown as Record<string, number>)[col] += tokens;
       agg.total_tokens += tokens;
       agg.estimated_cost_usd += computeRowCost(row);
+    }
+    for (const blockedUserId of BLOCKED_LEADERBOARD_USER_IDS) {
+      aggMap.delete(blockedUserId);
     }
 
     if (aggMap.size === 0) {

@@ -26,6 +26,12 @@ const cors = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
 };
+const BLOCKED_LEADERBOARD_USER_IDS = new Set(
+  (Deno.env.get("LEADERBOARD_BLOCKED_USER_IDS") ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean),
+);
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -160,12 +166,20 @@ export default async function (req: Request): Promise<Response> {
     }
   }
 
+  const visibleEntries = (entries || []).filter(
+    (e: { user_id?: string }) => !e.user_id || !BLOCKED_LEADERBOARD_USER_IDS.has(e.user_id),
+  );
+  const visibleMe =
+    me && !BLOCKED_LEADERBOARD_USER_IDS.has((me as { user_id?: string }).user_id || "")
+      ? me
+      : null;
+
   return json({
-    entries: (entries || []).map((e: { user_id?: string }) => ({
+    entries: visibleEntries.map((e: { user_id?: string }) => ({
       ...e,
-      is_me: (me as { user_id?: string } | null)?.user_id === e.user_id,
+      is_me: (visibleMe as { user_id?: string } | null)?.user_id === e.user_id,
     })),
-    me,
+    me: visibleMe,
     total_entries: count || 0,
     total_pages: Math.ceil((count || 0) / limit),
     from: from_day,

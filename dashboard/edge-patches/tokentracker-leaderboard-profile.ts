@@ -24,6 +24,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers":
     "Content-Type, Authorization, apikey, x-tokentracker-device-token-hash",
 };
+const BLOCKED_LEADERBOARD_USER_IDS = new Set(
+  (Deno.env.get("LEADERBOARD_BLOCKED_USER_IDS") ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean),
+);
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -356,6 +362,7 @@ export default async function (req: Request): Promise<Response> {
   const periodInput = url.searchParams.get("period") || "week";
   const period = ["week", "month", "total"].includes(periodInput) ? periodInput : "week";
   if (!userId) return json({ error: "user_id is required" }, 400);
+  if (BLOCKED_LEADERBOARD_USER_IDS.has(userId)) return json({ error: "Not found" }, 404);
 
   const callerUserId = await verifyCallerUserId(req);
   const isSelf = Boolean(callerUserId && callerUserId === userId);
