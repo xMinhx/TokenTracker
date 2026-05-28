@@ -328,6 +328,37 @@ export async function getLeaderboardProfile({
   });
 }
 
+function mockLikeCount(userId: string | undefined | null) {
+  if (!userId) return 0;
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash % 165) + 24;
+}
+
+export async function getProfileLikes({ userId }: AnyRecord = {}) {
+  if (isMockEnabled()) {
+    return { count: mockLikeCount(userId) };
+  }
+  // Public read — same rationale as getLeaderboard: don't attach Authorization
+  // so a malformed/expired JWT can't 500 the gateway for unauthenticated callers.
+  return fetchInsforgeFunction("tokentracker-profile-likes", {
+    params: { user_id: userId },
+  });
+}
+
+export async function bumpProfileLike({ userId, delta, accessToken }: AnyRecord = {}) {
+  if (isMockEnabled()) {
+    return { count: Math.max(0, mockLikeCount(userId) + Number(delta || 0)) };
+  }
+  return fetchInsforgeFunction("tokentracker-profile-likes", {
+    accessToken,
+    method: "POST",
+    body: { user_id: userId, delta },
+  });
+}
+
 export async function getUserStatus(_opts: AnyRecord = {}) {
   if (isMockEnabled()) {
     const now = new Date().toISOString();

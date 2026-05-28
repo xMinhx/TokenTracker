@@ -13,6 +13,7 @@ import { ProviderIcon } from "../../ui/dashboard/components/ProviderIcon.jsx";
 import { ActivityHeatmap } from "../../ui/dashboard/components/ActivityHeatmap.jsx";
 import { cn } from "../../lib/cn";
 import { isNativeApp } from "../../lib/native-bridge.js";
+import { LikeButton } from "../../ui/dashboard/components/LikeButton.jsx";
 
 function formatCost(value, currency, rate) {
   const n = Number(value);
@@ -266,6 +267,11 @@ function Header({ user, onClose }) {
           </a>
         )}
       </div>
+      {user?.user_id && (
+        <div className="shrink-0 flex items-center justify-center">
+          <LikeButton userId={user.user_id} />
+        </div>
+      )}
       {onClose && (
         <button
           type="button"
@@ -308,10 +314,13 @@ function PageHero({ user }) {
         className="shrink-0 ring-1 ring-oai-gray-200 dark:ring-oai-gray-800"
       />
       <div className="min-w-0 flex-1 flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="truncate text-2xl sm:text-[28px] font-semibold tracking-tight leading-tight text-oai-black dark:text-white">
-            {user?.display_name || "—"}
-          </h1>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="truncate text-2xl sm:text-[28px] font-semibold tracking-tight leading-tight text-oai-black dark:text-white">
+              {user?.display_name || "—"}
+            </h1>
+            {user?.user_id && <LikeButton userId={user.user_id} />}
+          </div>
           {handle ? (
             <a
               href={user.github_url}

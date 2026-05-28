@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-05-27T01:57:49.561Z",
+  "generatedAt": "2026-05-28T10:54:53.271Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 237,
-    "rawText": 145
+    "colors": 243,
+    "rawText": 148
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -260,6 +260,13 @@
         "Cancel"
       ]
     },
+    "dashboard/src/ui/dashboard/components/LikeButton.jsx": {
+      "colors": 6,
+      "rawText": 1,
+      "rawTextTokens": [
+        "setTriggerNumAnim(false), 500); const colors = [\"#ff4757\", \"#ff6b81\", \"#ffa502\", \"#70a1ff\", \"#2ed573\", \"#a29bfe\"]; const shapes = [\"circle\", \"heart\"]; const newParticles = []; for (let i = 0; i"
+      ]
+    },
     "dashboard/src/ui/dashboard/components/ProviderIcon.jsx": {
       "colors": 2,
       "rawText": 0,
@@ -277,12 +284,14 @@
     },
     "dashboard/src/ui/dashboard/components/TrendMonitor.jsx": {
       "colors": 30,
-      "rawText": 4,
+      "rawText": 6,
       "rawTextTokens": [
         "0 ? (",
         "No data yet",
+        "Predicted",
         "Tokens",
-        "sum + s.value, 0); return ("
+        "Unsynced",
+        "sum + s.value, 0); const renderFlat = kind !== \"real\" || totalSegmentsValue"
       ]
     },
     "dashboard/src/ui/dashboard/components/UsageLimitsPanel.jsx": {
