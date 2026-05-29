@@ -1,5 +1,5 @@
 import { fireEvent, render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { ThemeContext } from "../../../foundation/ThemeProvider.jsx";
 import { ActivityHeatmap } from "../ActivityHeatmap.jsx";
 
@@ -10,7 +10,7 @@ const themeValue = {
   toggleTheme: () => {},
 };
 
-function renderHeatmap() {
+function renderHeatmap(props = {}) {
   const heatmap = {
     to: "2026-05-02",
     weeks: [
@@ -28,12 +28,16 @@ function renderHeatmap() {
 
   return render(
     <ThemeContext.Provider value={themeValue}>
-      <ActivityHeatmap heatmap={heatmap} timeZoneShortLabel="UTC" />
+      <ActivityHeatmap heatmap={heatmap} timeZoneShortLabel="UTC" {...props} />
     </ThemeContext.Provider>,
   );
 }
 
 describe("ActivityHeatmap", () => {
+  afterEach(() => {
+    window.localStorage.removeItem("tt:heatmap-view");
+  });
+
   it("keeps the 2D day detail card transparent to pointer movement", () => {
     const { container } = renderHeatmap();
     const firstCell = container.querySelector(".heatmap-scroll-thin span[style*='background']");
@@ -47,5 +51,22 @@ describe("ActivityHeatmap", () => {
     expect(tooltip).toBeTruthy();
     expect(tooltip.className).toContain("pointer-events-none");
     expect(tooltip.className).not.toContain("pointer-events-auto");
+  });
+
+  it("forces 2D when embedded, ignoring the persisted 3D dashboard preference", () => {
+    // Reproduces the leaderboard-modal regression: picking 3D on the standalone
+    // dashboard persists "3d" to localStorage, which the embedded modal instance
+    // would otherwise read and render in 3D.
+    window.localStorage.setItem("tt:heatmap-view", "3d");
+
+    const { container } = renderHeatmap({ embedded: true });
+
+    // The 2D scroll container only renders in 2D view, so its presence proves
+    // the embedded instance stayed 2D despite the persisted 3D preference.
+    expect(container.querySelector(".heatmap-scroll-thin")).toBeTruthy();
+    // Embedded hosts expose no 2D/3D toggle.
+    expect(container.querySelector("[role='tablist']")).toBeNull();
+    // The embedded instance must not clobber the dashboard's persisted choice.
+    expect(window.localStorage.getItem("tt:heatmap-view")).toBe("3d");
   });
 });

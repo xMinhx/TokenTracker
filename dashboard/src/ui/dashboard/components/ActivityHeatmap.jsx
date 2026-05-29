@@ -261,6 +261,11 @@ export function ActivityHeatmap({
     : (isDark ? PALETTES.emerald.dark : PALETTES.emerald.light);
 
   const [view, setView] = useState(() => {
+    // Embedded hosts (e.g. the leaderboard profile modal) have no 2D/3D
+    // toggle and must always render the compact 2D grid. Ignore the persisted
+    // dashboard preference so a user who picked 3D on the dashboard doesn't
+    // see 3D inside the modal.
+    if (embedded) return "2d";
     try {
       const stored = window.localStorage?.getItem("tt:heatmap-view");
       return stored === "3d" ? "3d" : "2d";
@@ -269,8 +274,11 @@ export function ActivityHeatmap({
     }
   });
   useEffect(() => {
+    // Only the standalone dashboard owns the persisted preference; embedded
+    // instances must not write it back (would clobber the dashboard's 3D pick).
+    if (embedded) return;
     try { window.localStorage?.setItem("tt:heatmap-view", view); } catch { /* ignore */ }
-  }, [view]);
+  }, [view, embedded]);
 
   useEffect(() => {
     const el = scrollRef.current;
