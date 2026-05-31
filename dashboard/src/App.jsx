@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useMemo } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
@@ -8,13 +8,19 @@ import { ThemeProvider } from "./ui/foundation/ThemeProvider.jsx";
 import { useInsforgeAuth } from "./contexts/InsforgeAuthContext.jsx";
 import { LoginModalProvider } from "./contexts/LoginModalContext.jsx";
 import { LoginModal } from "./components/LoginModal.jsx";
-import { getBackendBaseUrl } from "./lib/config";
+import { getBackendBaseUrl, getLeaderboardBaseUrl } from "./lib/config";
 import { isMockEnabled } from "./lib/mock-data";
 import { isScreenshotModeEnabled } from "./lib/screenshot-mode";
 import { useCloudUsageSync } from "./hooks/use-cloud-usage-sync";
 import { AppLayout } from "./ui/components/Sidebar.jsx";
 import { CommandPalette } from "./ui/dashboard/components/CommandPalette.jsx";
 import { ToastProvider } from "./ui/components/Toast.jsx";
+import {
+  getLeaderboardPreloadContextKey,
+  markDashboardMainContentVisible,
+  preloadDashboardPageResources,
+  preloadLeaderboardDefaultState,
+} from "./lib/dashboard-preload.js";
 // NativeAuthCallbackPage must be eager-imported: its module-level code
 // captures the OAuth `insforge_code` query param synchronously at app
 // boot, BEFORE the InsForge SDK's detectAuthCallback() strips it. Lazy
@@ -66,6 +72,9 @@ export default function App() {
   const location = useLocation();
   const insforge = useInsforgeAuth();
   useCloudUsageSync();
+  const dashboardMainContentVisibleRef = useRef(false);
+  const dashboardResourcePreloadStartedRef = useRef(false);
+  const leaderboardStatePreloadContextKeysRef = useRef(new Set());
   const mockEnabled = isMockEnabled();
   const screenshotMode = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -88,6 +97,7 @@ export default function App() {
     (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
   const normalizedPath = pathname.replace(/\/+$/, "") || "/";
+  const isDashboardDefaultPath = normalizedPath === "/" || normalizedPath === "/dashboard";
   const isLeaderboardPath = normalizedPath === "/leaderboard";
   // Standalone shareable profile page: /u/:userId (public, anonymous-visible).
   const profileMatch = normalizedPath.match(/^\/u\/([^/]+)$/i);
@@ -98,6 +108,60 @@ export default function App() {
   const sessionSoftExpired = false;
   const baseUrl = getBackendBaseUrl();
   const isAuthGateTriggered = !signedIn && !mockEnabled && !isLocalMode;
+  const leaderboardAccessMode = mockEnabled
+    ? "mock"
+    : insforge.loading
+      ? "unavailable"
+      : cloudAuthSignedIn
+        ? "cloud"
+        : signedIn
+          ? "local"
+          : "unavailable";
+
+  const tryPreloadLeaderboardDefaultState = useCallback(() => {
+    if (!dashboardMainContentVisibleRef.current) return;
+    if (!mockEnabled && insforge.loading) return;
+    if (!mockEnabled && !signedIn) return;
+    const preloadOptions = {
+      accessMode: leaderboardAccessMode,
+      baseUrl: getLeaderboardBaseUrl(),
+      mockEnabled,
+      signedIn,
+      authLoading: Boolean(insforge.loading),
+      userId: cloudAuthSignedIn ? insforge.user?.id || null : null,
+    };
+    const contextKey = getLeaderboardPreloadContextKey(preloadOptions);
+    if (leaderboardStatePreloadContextKeysRef.current.has(contextKey)) return;
+    leaderboardStatePreloadContextKeysRef.current.add(contextKey);
+    void preloadLeaderboardDefaultState(preloadOptions);
+  }, [
+    cloudAuthSignedIn,
+    insforge.loading,
+    insforge.user?.id,
+    leaderboardAccessMode,
+    mockEnabled,
+    signedIn,
+  ]);
+
+  const handleDashboardMainContentVisible = useCallback(() => {
+    if (!isDashboardDefaultPath) return;
+    if (!dashboardMainContentVisibleRef.current) {
+      dashboardMainContentVisibleRef.current = true;
+      markDashboardMainContentVisible();
+    }
+    if (!dashboardResourcePreloadStartedRef.current) {
+      dashboardResourcePreloadStartedRef.current = true;
+      void preloadDashboardPageResources();
+    }
+    tryPreloadLeaderboardDefaultState();
+  }, [
+    isDashboardDefaultPath,
+    tryPreloadLeaderboardDefaultState,
+  ]);
+
+  useEffect(() => {
+    tryPreloadLeaderboardDefaultState();
+  }, [tryPreloadLeaderboardDefaultState]);
 
   const authObject = useMemo(() => {
     if (!insforge.enabled || !cloudAuthSignedIn) return null;
@@ -180,6 +244,7 @@ export default function App() {
         userId={profileUserId}
         signInUrl="/login"
         signUpUrl="/login"
+        onMainContentVisible={handleDashboardMainContentVisible}
       />
     );
     if (showSidebar) {
