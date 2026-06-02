@@ -154,12 +154,28 @@ export default async function (req: Request): Promise<Response> {
       }
     }
 
-    // Update settings (enabled / anonymous / github_url / show_github_url)
+    // Trim + cap the display name once so the saved value and the returned
+    // value can't drift.
+    let normalizedDisplayName: string | null | undefined = undefined;
+    if (typeof body.display_name === "string") {
+      normalizedDisplayName = body.display_name.trim().slice(0, 50) || null;
+    }
+
+    // Persist everything to tokentracker_user_settings — the writable base table.
+    //
+    // display_name MUST be written here, NOT to tokentracker_user_profiles:
+    // the latter is a VIEW (SELECT over auth.users LEFT JOIN
+    // tokentracker_user_settings), so upserting it fails with "cannot insert
+    // into view". The view exposes
+    //   display_name = COALESCE(s.display_name, users.profile->>'name', email-local-part)
+    // so writing tokentracker_user_settings.display_name is exactly what makes
+    // the subsequent GET (which reads the view) reflect the saved name.
     if (
       body.enabled !== undefined ||
       body.anonymous !== undefined ||
       normalizedGithubUrl !== undefined ||
-      body.show_github_url !== undefined
+      body.show_github_url !== undefined ||
+      normalizedDisplayName !== undefined
     ) {
       const upsertRow: Record<string, unknown> = {
         user_id: userId,
@@ -169,34 +185,13 @@ export default async function (req: Request): Promise<Response> {
       if (body.anonymous !== undefined) upsertRow.leaderboard_anonymous = Boolean(body.anonymous);
       if (normalizedGithubUrl !== undefined) upsertRow.github_url = normalizedGithubUrl;
       if (body.show_github_url !== undefined) upsertRow.show_github_url = Boolean(body.show_github_url);
-      await client.database.from("tokentracker_user_settings").upsert(
+      if (normalizedDisplayName !== undefined) upsertRow.display_name = normalizedDisplayName;
+      const { error: settingsErr } = await client.database.from("tokentracker_user_settings").upsert(
         upsertRow,
         { onConflict: "user_id" },
       );
-    }
-
-    // Update display_name in user_profiles.
-    // NOTE: tokentracker_user_profiles has NO `updated_at` column (unlike
-    // tokentracker_user_settings). Including it made the upsert fail with
-    // Postgres 42703 ("column ... does not exist"); the error was swallowed
-    // here so the POST still returned 200 with an optimistic result, the UI
-    // showed "saved", but the next GET read back the unchanged name — the
-    // display name silently reverted on every revisit. Do not re-add it.
-    // Trim + cap once so the saved value and the returned value can't drift.
-    let normalizedDisplayName: string | null | undefined = undefined;
-    if (typeof body.display_name === "string") {
-      normalizedDisplayName = body.display_name.trim().slice(0, 50) || null;
-      const { error: profileErr } = await client.database
-        .from("tokentracker_user_profiles")
-        .upsert(
-          {
-            user_id: userId,
-            display_name: normalizedDisplayName,
-          },
-          { onConflict: "user_id" },
-        );
-      if (profileErr) {
-        return json({ error: profileErr.message || "Failed to save display name" }, 500);
+      if (settingsErr) {
+        return json({ error: settingsErr.message || "Failed to save settings" }, 500);
       }
     }
 

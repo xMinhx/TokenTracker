@@ -194,7 +194,7 @@ function useVisibilityActions(state, mutateProfile) {
   return { handleAnonymousToggle, handlePublicProfileToggle };
 }
 
-function useNameActions(state, mutateProfile) {
+function useNameActions(state, mutateProfile, refreshDisplayName) {
   const handleSaveName = useCallback(async () => {
     const trimmed = state.nameInput.trim().slice(0, 50);
     if (!trimmed) return;
@@ -203,9 +203,14 @@ function useNameActions(state, mutateProfile) {
       onSuccess: () => {
         state.setCustomDisplayName(trimmed);
         state.setEditingName(false);
+        // Propagate to the shared auth-context displayName so the sidebar
+        // avatar/name updates immediately, without a full page reload. The
+        // leaderboard self-name comes from a server snapshot and updates on
+        // its own refresh cadence.
+        refreshDisplayName?.();
       },
     });
-  }, [mutateProfile, state]);
+  }, [mutateProfile, state, refreshDisplayName]);
 
   const startEditingName = useCallback(() => {
     state.setNameInput(state.customDisplayName || state.displayName);
@@ -267,7 +272,7 @@ export function useAccountProfileSettings() {
   useProfileLoad(auth.getAccessToken, auth.signedIn, state.loadSetters);
   const mutateProfile = useProfileMutation(auth.getAccessToken, state);
   const visibilityActions = useVisibilityActions(state, mutateProfile);
-  const nameActions = useNameActions(state, mutateProfile);
+  const nameActions = useNameActions(state, mutateProfile, auth.refreshDisplayName);
   const githubActions = useGithubActions(state, mutateProfile);
 
   return {
