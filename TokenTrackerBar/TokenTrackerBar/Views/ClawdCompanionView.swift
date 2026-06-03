@@ -16,6 +16,10 @@ struct ClawdCompanionView: View {
     /// Floating pet: hover enter/leave, so the controller can slide an edge-hidden pet
     /// out and back.
     var onHoverChanged: ((Bool) -> Void)? = nil
+    /// Reset sleep activity timer on token consumption.
+    var onKeepActive: (() -> Void)? = nil
+    /// Floating pet: change the pet size preset (from the right-click menu).
+    var onSetSize: ((PetSizePreset) -> Void)? = nil
     /// Floating pet: gates the bubble by on-screen width (set by DesktopPetWindowController).
     @ObservedObject var petState: PetWindowState = .alwaysAllowed
 
@@ -35,11 +39,15 @@ struct ClawdCompanionView: View {
     @State private var hoveringCharacter = false
     @State private var tapOverrideState: ClawdState?
     @State private var idleVariant: ClawdState = .idleLiving
+    @State private var lastTokens = 0
+    @State private var modelStatusText: String? = nil
+    @State private var modelStatusTask: Task<Void, Never>? = nil
 
     private let px: CGFloat = 4.0
     private let syncSpinPeriod: TimeInterval = 0.8
-    /// Sprite magnification for the standalone desktop-pet window (1.0 in the dashboard).
-    private let floatingScale: CGFloat = 1.4
+    /// Sprite magnification for the standalone desktop-pet window, driven by the chosen
+    /// size preset (only applied in the `.floating` layout).
+    private var floatingScale: CGFloat { petState.floatingScale }
 
     var body: some View {
         Group {
@@ -51,6 +59,43 @@ struct ClawdCompanionView: View {
         .onAppear {
             startBlinkLoop()
             startIdleVariantLoop()
+            lastTokens = viewModel.todayTokens
+        }
+        .onChange(of: viewModel.todayTokens) { newTokens in
+            if lastTokens > 0, newTokens > lastTokens {
+                // Token activity counts as life: don't let the pet appear asleep mid-work.
+                if petState.sleepState != nil { petState.sleepState = nil }
+                onKeepActive?()
+                let delta = newTokens - lastTokens
+                let formattedDelta = TokenFormatter.formatCompact(delta)
+                modelStatusText = Strings.randomTokenIncrementMessage(delta: formattedDelta)
+                
+                modelStatusTask?.cancel()
+                modelStatusTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if !Task.isCancelled {
+                        modelStatusText = nil
+                    }
+                }
+            }
+            lastTokens = newTokens
+        }
+        .onChange(of: viewModel.isSyncing) { syncing in
+            if !syncing {
+                if viewModel.todayTokens <= lastTokens {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        quipIndex += 1
+                    }
+                    floatingBubbleTask?.cancel()
+                    floatingBubbleShown = true
+                    floatingBubbleTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        if !Task.isCancelled {
+                            floatingBubbleShown = false
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -96,6 +141,7 @@ struct ClawdCompanionView: View {
                 .allowsHitTesting(false)
                 .opacity(floatingBubbleVisible ? 1 : 0)
                 .animation(.easeOut(duration: 0.18), value: floatingBubbleVisible)
+                .offset(x: petState.isSnapped ? (petState.isRightEdge ? -40 : 40) : 0)
                 .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .bottom)
 
             characterView
@@ -121,6 +167,21 @@ struct ClawdCompanionView: View {
                 .onTapGesture(count: 1) { handleFloatingTap() }
                 .contextMenu {
                     Button(Strings.openDashboard) { onRequestDashboard?() }
+                    Button(Strings.menuSyncNow) { Task { await viewModel.triggerSync() } }
+                    Menu(Strings.menuPetSize) {
+                        let current = PetSizePreset.from(scale: petState.floatingScale)
+                        ForEach(PetSizePreset.allCases, id: \.self) { preset in
+                            Button {
+                                onSetSize?(preset)
+                            } label: {
+                                if preset == current {
+                                    Label(preset.menuLabel, systemImage: "checkmark")
+                                } else {
+                                    Text(preset.menuLabel)
+                                }
+                            }
+                        }
+                    }
                     Divider()
                     Button(Strings.menuHidePet) { onClosePet?() }
                 }
@@ -132,7 +193,7 @@ struct ClawdCompanionView: View {
     /// The floating bubble is shown while hovering (precise data) or briefly after a tap —
     /// but only when enough of the pet is on-screen (not edge-tucked or dragging off).
     private var floatingBubbleVisible: Bool {
-        (hoveringCharacter || floatingBubbleShown) && petState.bubbleAllowed
+        (hoveringCharacter || floatingBubbleShown || modelStatusText != nil) && petState.bubbleAllowed
     }
 
     // MARK: - Speech Bubble
@@ -254,11 +315,13 @@ struct ClawdCompanionView: View {
         let hoverEyeShift: CGFloat
         let hoveringCharacter: Bool
         let hoverSide: HoverSide
+        let isRightEdgeMini: Bool
 
         func r(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat,
                dx: CGFloat = 0, dy: CGFloat = 0) -> CGRect {
-            CGRect(x: (x + dx) * s, y: (y - yBase + dy) * s + yOff,
-                   width: w * s, height: h * s)
+            let actualX: CGFloat = isRightEdgeMini ? (15.0 - (x + dx) - w) : (x + dx)
+            return CGRect(x: actualX * s, y: (y - yBase + dy) * s + yOff,
+                          width: w * s, height: h * s)
         }
     }
 
@@ -279,7 +342,8 @@ struct ClawdCompanionView: View {
                     hoverLeanX: hoverLeanX,
                     hoverEyeShift: hoverEyeShift,
                     hoveringCharacter: hoveringCharacter,
-                    hoverSide: hoverSide
+                    hoverSide: hoverSide,
+                    isRightEdgeMini: petState.isTucked && petState.isRightEdge
                 )
 
                 switch clawdState {
@@ -292,6 +356,13 @@ struct ClawdCompanionView: View {
                 case .workingUltrathink: Self.drawWorkingUltrathink(ctx: ctx, context: &context)
                 case .disconnected:    Self.drawDisconnected(ctx: ctx, context: &context)
                 case .error:           Self.drawError(ctx: ctx, context: &context)
+                case .yawning:         Self.drawYawning(ctx: ctx, context: &context)
+                case .waking:          Self.drawWaking(ctx: ctx, context: &context)
+                case .miniIdle:        Self.drawMiniIdle(ctx: ctx, context: &context)
+                case .miniPeek:        Self.drawMiniPeek(ctx: ctx, context: &context)
+                case .miniAlert:       Self.drawMiniAlert(ctx: ctx, context: &context)
+                case .miniHappy:       Self.drawMiniHappy(ctx: ctx, context: &context)
+                case .miniSleep:       Self.drawMiniSleep(ctx: ctx, context: &context)
                 }
             }
         }
@@ -318,7 +389,8 @@ struct ClawdCompanionView: View {
                         hoverLeanX: 0,
                         hoverEyeShift: 0,
                         hoveringCharacter: false,
-                        hoverSide: .none
+                        hoverSide: .none,
+                        isRightEdgeMini: false
                     )
                     ClawdCompanionView.drawWorkingUltrathink(ctx: ctx, context: &context)
                 }
@@ -771,6 +843,134 @@ struct ClawdCompanionView: View {
         )
     }
 
+    private static func drawMiniIdle(ctx: DrawCtx, context: inout GraphicsContext) {
+        let bodyColor = ctx.bodyColor, eyeColor = ctx.eyeColor
+        context.fill(Path(ctx.r(3, 15, 9, 0.5)), with: .color(.black.opacity(0.12)))
+        for lx: CGFloat in [3, 5, 9, 11] {
+            context.fill(Path(ctx.r(lx, 12, 1, 3)), with: .color(bodyColor))
+        }
+        context.fill(Path(ctx.r(2, 6, 11, 7)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(0, 9, 2, 2)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(13, 9, 2, 2)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(4, 8, 1, 2)), with: .color(eyeColor))
+        context.fill(Path(ctx.r(10, 8, 1, 2)), with: .color(eyeColor))
+    }
+
+    private static func drawMiniPeek(ctx: DrawCtx, context: inout GraphicsContext) {
+        let bodyColor = ctx.bodyColor, eyeColor = ctx.eyeColor
+        context.fill(Path(ctx.r(3, 15, 9, 0.5)), with: .color(.black.opacity(0.12)))
+        for lx: CGFloat in [3, 5, 9, 11] {
+            context.fill(Path(ctx.r(lx, 12, 1, 3)), with: .color(bodyColor))
+        }
+        context.fill(Path(ctx.r(2, 6, 11, 7)), with: .color(bodyColor))
+        
+        // Left arm is resting
+        context.fill(Path(ctx.r(0, 9, 2, 2)), with: .color(bodyColor))
+        
+        // Right arm is waving
+        let waveY = 8 + sin(ctx.t * 28.0) * 1.5
+        context.fill(Path(ctx.r(13, waveY, 2, 2)), with: .color(bodyColor))
+        
+        context.fill(Path(ctx.r(4, 8, 1, 2)), with: .color(eyeColor))
+        context.fill(Path(ctx.r(10, 8, 1, 2)), with: .color(eyeColor))
+    }
+
+    private static func drawMiniAlert(ctx: DrawCtx, context: inout GraphicsContext) {
+        let bodyColor = ctx.bodyColor, eyeColor = ctx.eyeColor
+        context.fill(Path(ctx.r(3, 15, 9, 0.5)), with: .color(.black.opacity(0.12)))
+        for lx: CGFloat in [3, 5, 9, 11] {
+            context.fill(Path(ctx.r(lx, 12, 1, 3)), with: .color(bodyColor))
+        }
+        context.fill(Path(ctx.r(2, 6, 11, 7)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(0, 9, 2, 2)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(13, 9, 2, 2)), with: .color(bodyColor))
+        
+        context.fill(Path(ctx.r(4, 9, 1.5, 0.4)), with: .color(eyeColor))
+        context.fill(Path(ctx.r(9.5, 9, 1.5, 0.4)), with: .color(eyeColor))
+
+        let flash = sin(ctx.t * 8.0) > 0
+        if flash {
+            context.fill(Path(ctx.r(7, 2, 1, 2.5)), with: .color(.red))
+            context.fill(Path(ctx.r(7, 5.2, 1, 0.8)), with: .color(.red))
+        }
+    }
+
+    private static func drawMiniHappy(ctx: DrawCtx, context: inout GraphicsContext) {
+        let bodyColor = ctx.bodyColor, eyeColor = ctx.eyeColor
+        context.fill(Path(ctx.r(3, 15, 9, 0.5)), with: .color(.black.opacity(0.12)))
+        for lx: CGFloat in [3, 5, 9, 11] {
+            context.fill(Path(ctx.r(lx, 12, 1, 3)), with: .color(bodyColor))
+        }
+        context.fill(Path(ctx.r(2, 6, 11, 7)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(0, 9, 2, 2)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(13, 9, 2, 2)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(3.5, 9, 1.5, 0.5)), with: .color(eyeColor))
+        context.fill(Path(ctx.r(10, 9, 1.5, 0.5)), with: .color(eyeColor))
+
+        let starAlpha = 0.5 + sin(ctx.t * 10.0) * 0.5
+        context.fill(Path(ctx.r(9, 3, 1.2, 1.2)), with: .color(.yellow.opacity(starAlpha)))
+    }
+
+    private static func drawMiniSleep(ctx: DrawCtx, context: inout GraphicsContext) {
+        let bodyColor = ctx.bodyColor, eyeColor = ctx.eyeColor
+        context.fill(Path(ctx.r(3, 15, 9, 0.5)), with: .color(.black.opacity(0.12)))
+        for lx: CGFloat in [3, 5, 9, 11] {
+            context.fill(Path(ctx.r(lx, 12, 1, 3)), with: .color(bodyColor))
+        }
+        context.fill(Path(ctx.r(2, 6, 11, 7)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(0, 9, 2, 2)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(13, 9, 2, 2)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(4, 9, 1, 0.35)), with: .color(eyeColor))
+        context.fill(Path(ctx.r(10, 9, 1, 0.35)), with: .color(eyeColor))
+
+        let zT = ctx.t.truncatingRemainder(dividingBy: 4.0) / 4.0
+        let rise = zT * 6.0
+        let alpha = zT < 0.15 ? zT * 6 : (zT > 0.85 ? (1.0 - zT) * 6 : 0.7)
+        context.draw(
+            Text("z")
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .foregroundColor(.secondary.opacity(alpha * 0.5)),
+            at: CGPoint(x: (ctx.isRightEdgeMini ? 4 : 11) * ctx.s, y: (4 - rise) * ctx.s + ctx.yOff)
+        )
+    }
+
+    private static func drawYawning(ctx: DrawCtx, context: inout GraphicsContext) {
+        let t = ctx.t, bodyColor = ctx.bodyColor, eyeColor = ctx.eyeColor
+        let breathPhase = sin(t / 2.0 * .pi * 2)
+        let dy: CGFloat = -1.0 + breathPhase * 0.5
+        let dx = ctx.hoverLeanX
+
+        context.fill(Path(ctx.r(3, 15, 9, 0.5, dx: dx)), with: .color(.black.opacity(0.12)))
+        for lx: CGFloat in [3, 5, 9, 11] {
+            context.fill(Path(ctx.r(lx, 12, 1, 3)), with: .color(bodyColor))
+        }
+        context.fill(Path(ctx.r(2, 6, 11, 7, dx: dx, dy: dy)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(0, 9, 2, 2, dx: dx, dy: dy)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(13, 9, 2, 2, dx: dx, dy: dy)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(4, 9, 1.5, 0.4, dx: dx, dy: dy)), with: .color(eyeColor))
+        context.fill(Path(ctx.r(10, 9, 1.5, 0.4, dx: dx, dy: dy)), with: .color(eyeColor))
+        context.fill(Path(ctx.r(7, 10.5, 1.5, 1.5, dx: dx, dy: dy)), with: .color(eyeColor))
+    }
+
+    private static func drawWaking(ctx: DrawCtx, context: inout GraphicsContext) {
+        let t = ctx.t, bodyColor = ctx.bodyColor, eyeColor = ctx.eyeColor
+        let bouncePhase = sin(t * 20.0)
+        let dy: CGFloat = bouncePhase * 0.8
+        let dx = ctx.hoverLeanX + sin(t * 15.0) * 0.3
+
+        context.fill(Path(ctx.r(3, 15, 9, 0.5, dx: dx)), with: .color(.black.opacity(0.12)))
+        for lx: CGFloat in [3, 5, 9, 11] {
+            context.fill(Path(ctx.r(lx, 12, 1, 3)), with: .color(bodyColor))
+        }
+        context.fill(Path(ctx.r(2, 5, 11, 8, dx: dx, dy: dy)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(0, 7, 2, 2, dx: dx, dy: dy)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(13, 7, 2, 2, dx: dx, dy: dy)), with: .color(bodyColor))
+        context.fill(Path(ctx.r(3.5, 8, 2, 2.5, dx: dx, dy: dy)), with: .color(eyeColor))
+        context.fill(Path(ctx.r(9.5, 8, 2, 2.5, dx: dx, dy: dy)), with: .color(eyeColor))
+        context.fill(Path(ctx.r(4, 8.5, 0.8, 0.8, dx: dx, dy: dy)), with: .color(.white))
+        context.fill(Path(ctx.r(10, 8.5, 0.8, 0.8, dx: dx, dy: dy)), with: .color(.white))
+    }
+
     // MARK: - State Resolution
 
     enum ClawdState: Equatable {
@@ -783,22 +983,60 @@ struct ClawdCompanionView: View {
         case workingUltrathink
         case disconnected
         case error
+        case yawning
+        case waking
+
+        // Mini Mode
+        case miniIdle
+        case miniPeek
+        case miniAlert
+        case miniHappy
+        case miniSleep
     }
 
     private var clawdState: ClawdState {
-        // 0. Tap override (temporary animation)
+        // 0. Tap override (temporary animation) — explicit interaction wins.
         if let override = tapOverrideState { return override }
 
-        // 1. Status overrides
-        if !viewModel.serverOnline { return .disconnected }
-        if viewModel.error != nil { return .error }
+        // 1. Resolve raw state
+        let rawState: ClawdState = {
+            if !viewModel.serverOnline { return .disconnected }
+            if viewModel.error != nil { return .error }
+            if viewModel.isSyncing { return .workingTyping }
+            if viewModel.todayTokens == 0 { return .sleeping }
+            return idleVariant
+        }()
 
-        // 2. Syncing → typing animation
-        if viewModel.isSyncing { return .workingTyping }
+        // 1.5. Idle-timer sleep/wake override — but never mask an active
+        //      working/error/disconnected state (the pet shouldn't doze mid-sync).
+        let isBusy = rawState == .workingTyping || rawState == .disconnected || rawState == .error
+        if let sleepState = petState.sleepState, !isBusy {
+            if petState.isTucked {
+                if sleepState == .sleeping || sleepState == .yawning {
+                    return .miniSleep
+                }
+                if sleepState == .waking {
+                    return .miniPeek
+                }
+            }
+            return sleepState
+        }
 
-        // 3. Idle — token count only affects personality (quips), not animation
-        if viewModel.todayTokens == 0 { return .sleeping }
-        return idleVariant
+        // 2. Mini mode redirection
+        if petState.isTucked {
+            if rawState == .disconnected || rawState == .error {
+                return .miniAlert
+            }
+            if petState.isHovered {
+                return .miniPeek
+            }
+            if rawState == .sleeping {
+                return .miniSleep
+            }
+            return .miniIdle
+        }
+
+        return rawState
     }
 
     // MARK: - Drawing Helpers
@@ -861,6 +1099,9 @@ struct ClawdCompanionView: View {
     /// idea to macOS so a glance always maps to a real number; otherwise the
     /// data-rich rotating quip (which already bakes in real figures) is shown.
     private var bubbleText: String {
+        if let statusText = modelStatusText {
+            return statusText
+        }
         if layout == .floating, hoveringCharacter, viewModel.serverOnline,
            !viewModel.isSyncing, viewModel.todayTokens > 0 {
             return Strings.tokensSpentToday(

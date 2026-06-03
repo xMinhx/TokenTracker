@@ -32,6 +32,20 @@ final class UpdateChecker {
 
     func check(silent: Bool = false) {
         guard !isBusy else { return }
+
+        // Developer / Debug path guard:
+        // Skip automatic silent background checks if the application is running from outside
+        // the standard Applications directories (e.g., from Xcode DerivedData).
+        // This prevents developer builds from being replaced by official App Store/GitHub releases.
+        if silent {
+            let path = Bundle.main.bundlePath
+            let inStandardApps = path.hasPrefix("/Applications/") || path.hasPrefix("/Users/\(NSUserName())/Applications/")
+            if !inStandardApps {
+                Swift.print("[UpdateChecker] Skipping silent update check: running from non-standard path \(path)")
+                return
+            }
+        }
+
         isBusy = true
         statusText = Strings.updateChecking
 

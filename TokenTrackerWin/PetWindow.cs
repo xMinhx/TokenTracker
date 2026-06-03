@@ -52,6 +52,19 @@ internal sealed class PetWindow : Window
     private UsagePoller.UsageStats _stats;
     private bool _connected = true;
 
+    // Snapping / Mini mode states
+    private bool _miniMode;
+    private bool _isRevealed;
+    private double _preMiniX;
+    private double _preMiniY;
+    private const double EdgePeek = 30;
+    private const double SnapMargin = 24;
+
+    // Mouse idle / wake tracking
+    private POINT _lastMousePos;
+    private long _lastMouseActiveTime;
+    private bool _mouseIdle;
+
     /// <summary>Raised (on the UI thread) when the user right-clicks the pet — the host shows a context menu.</summary>
     public event Action? ContextMenuRequested;
 
@@ -210,6 +223,32 @@ internal sealed class PetWindow : Window
     {
         if (!IsVisible || !_coreReady) return;
         if (!GetCursorPos(out var p)) return;
+
+        // Global mouse movement & sleep/wake sequence
+        long now = Environment.TickCount64;
+        bool moved = p.X != _lastMousePos.X || p.Y != _lastMousePos.Y;
+        if (moved)
+        {
+            _lastMousePos = p;
+            _lastMouseActiveTime = now;
+            if (_mouseIdle)
+            {
+                _mouseIdle = false;
+                _ = _webView.CoreWebView2.ExecuteScriptAsync(
+                    "window.dispatchEvent(new CustomEvent('pet:wake'));");
+            }
+        }
+        else
+        {
+            long idleDuration = now - _lastMouseActiveTime;
+            if (!_mouseIdle && idleDuration >= 60000)
+            {
+                _mouseIdle = true;
+                _ = _webView.CoreWebView2.ExecuteScriptAsync(
+                    "window.dispatchEvent(new CustomEvent('pet:sleep', { detail: { phase: 'sleeping' } }));");
+            }
+        }
+
         bool inside;
         try
         {
@@ -218,6 +257,21 @@ internal sealed class PetWindow : Window
             inside = p.X >= tl.X && p.X < br.X && p.Y >= tl.Y && p.Y < br.Y;
         }
         catch { return; }   // not laid out yet
+
+        if (_miniMode)
+        {
+            if (inside && !_isRevealed)
+            {
+                _isRevealed = true;
+                ApplyEdgePlacement(animated: true);
+            }
+            else if (!inside && _isRevealed)
+            {
+                _isRevealed = false;
+                ApplyEdgePlacement(animated: true);
+            }
+        }
+
         if (inside == _lastHover) return;
         _lastHover = inside;
         PushHover(inside);
@@ -349,7 +403,21 @@ internal sealed class PetWindow : Window
     /// </summary>
     public void ApplyStats(UsagePoller.UsageStats stats)
     {
+        var prevTokens = _stats.TodayTokens;
+        var prevCost = _stats.TodayCostUsd;
         _stats = stats;
+        if (prevTokens > 0 && stats.TodayTokens > prevTokens)
+        {
+            long tokensDelta = stats.TodayTokens - prevTokens;
+            decimal costDelta = stats.TodayCostUsd - prevCost;
+            if (_coreReady)
+            {
+                var modelName = "AI Model";
+                var costDeltaJs = costDelta.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                _ = _webView.CoreWebView2.ExecuteScriptAsync(
+                    $"window.dispatchEvent(new CustomEvent('pet:model-status', {{ detail: {{ modelName: '{modelName}', tokensDelta: {tokensDelta}, costDelta: {costDeltaJs} }} }}));");
+            }
+        }
         PushContext();
     }
 
@@ -384,6 +452,7 @@ internal sealed class PetWindow : Window
             topModels = (_stats.TopModels ?? Array.Empty<UsagePoller.TopModelStat>())
                 .Select(m => new { name = m.Name, percent = m.Percent, source = m.Source }),
         });
+        var mini = _miniMode ? "true" : "false";
         try
         {
             _ = _webView.CoreWebView2.ExecuteScriptAsync(
@@ -394,11 +463,13 @@ internal sealed class PetWindow : Window
                 $"window.__ttPetCostUsd={cost};" +
                 $"window.__ttPetStats={statsJson};" +
                 $"window.__ttPetConnected={connected};" +
+                $"window.__ttPetMiniMode={mini};" +
                 "window.dispatchEvent(new Event('pet:currency'));" +
                 "window.dispatchEvent(new Event('pet:locale'));" +
                 "window.dispatchEvent(new Event('pet:syncing'));" +
                 "window.dispatchEvent(new Event('pet:usage'));" +
-                "window.dispatchEvent(new Event('pet:connected'));");
+                "window.dispatchEvent(new Event('pet:connected'));" +
+                "window.dispatchEvent(new Event('pet:minimode'));");
         }
         catch { /* page mid-navigation */ }
     }
@@ -550,7 +621,74 @@ internal sealed class PetWindow : Window
         var x = Left;
         var y = Top;
         if (double.IsNaN(x) || double.IsNaN(y)) return;
-        WriteSettings(s => { s["PetX"] = x; s["PetY"] = y; });
+
+        var wa = SystemParameters.WorkArea;
+        // Snap to right edge of screen
+        if (x >= wa.Right - Width - SnapMargin)
+        {
+            if (!_miniMode)
+            {
+                _preMiniX = x;
+                _preMiniY = y;
+                _miniMode = true;
+                _isRevealed = false;
+                PushMiniMode(true);
+            }
+            ApplyEdgePlacement(animated: true);
+        }
+        else
+        {
+            if (_miniMode)
+            {
+                _miniMode = false;
+                _isRevealed = false;
+                PushMiniMode(false);
+                // Return to normal layout y
+                Left = x;
+            }
+            WriteSettings(s => { s["PetX"] = x; s["PetY"] = y; });
+        }
+    }
+
+    private void PushMiniMode(bool value)
+    {
+        if (!_coreReady) return;
+        try
+        {
+            _ = _webView.CoreWebView2.ExecuteScriptAsync(
+                $"window.__ttPetMiniMode={(value ? "true" : "false")};" +
+                $"window.dispatchEvent(new Event('pet:minimode'));");
+        }
+        catch { }
+    }
+
+    private async void ApplyEdgePlacement(bool animated)
+    {
+        if (!_coreReady) return;
+        var wa = SystemParameters.WorkArea;
+        double targetX = _isRevealed ? wa.Right - Width : wa.Right - EdgePeek;
+
+        if (!animated)
+        {
+            Left = targetX;
+            return;
+        }
+
+        double startX = Left;
+        double dx = targetX - startX;
+        if (Math.Abs(dx) < 1) return;
+
+        int steps = 15;
+        int durationMs = 220;
+        int delay = durationMs / steps;
+        for (int i = 1; i <= steps; i++)
+        {
+            double t = (double)i / steps;
+            double eased = t * (2 - t); // ease-out
+            Left = startX + dx * eased;
+            await Task.Delay(delay);
+        }
+        Left = targetX;
     }
 
     /// <summary>Keep the saved top-left within the virtual desktop (guards against a

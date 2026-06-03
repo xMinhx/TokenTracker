@@ -102,6 +102,10 @@ enum Strings {
     static var menuAnimatedIcon: String { t("Animated Icon", "动态图标", "動態圖示", "アニメーションアイコン", "애니메이션 아이콘") }
     static var menuDesktopPet: String { t("Desktop Pet", "桌面宠物", "桌面寵物", "デスクトップペット", "데스크톱 펫") }
     static var menuHidePet: String { t("Hide Pet", "隐藏桌宠", "隱藏桌寵", "ペットを隠す", "펫 숨기기") }
+    static var menuPetSize: String { t("Pet Size", "桌宠大小", "桌寵大小", "ペットのサイズ", "펫 크기") }
+    static var petSizeSmall: String { t("Small", "小", "小", "小", "작게") }
+    static var petSizeMedium: String { t("Medium", "中", "中", "中", "보통") }
+    static var petSizeLarge: String { t("Large", "大", "大", "大", "크게") }
     static var menuSettings: String { t("Settings", "设置", "設定", "設定", "설정") }
     // Status-bar inline label (Tokens / Cost) always stays English — it sits
     // next to the menu bar number and should not swap with system language.
@@ -280,5 +284,51 @@ enum Strings {
         let base = t("\(toolName) \(label) limit, \(percent)% \(modeSuffix)", "\(toolName) \(label) 限额，\(percent)% \(modeSuffix)", "\(toolName) \(label) 限額，\(percent)% \(modeSuffix)", "\(toolName) \(label) 上限、\(percent)% \(modeSuffix)", "\(toolName) \(label) 한도, \(percent)% \(modeSuffix)")
         guard let reset else { return base }
         return t("\(base), resets in \(reset)", "\(base)，\(reset) 后重置", "\(base)，\(reset) 後重置", "\(base)、\(reset) 後にリセット", "\(base), \(reset) 후 초기화")
+    }
+
+    static func randomTokenIncrementMessage(delta: String) -> String {
+        let pool = tArr(
+            [
+                "Gulp! Swallowed +\(delta) tokens! 😋",
+                "Claude had a feast of +\(delta)! 🍲",
+                "Summoned +\(delta) tokens! ✨",
+                "Huff puff... processed +\(delta)! 📝",
+                "Brainstorming! Consumed +\(delta) tokens 🧠",
+                "Done! Swallowed +\(delta) tokens 🚀"
+            ],
+            [
+                "咕噜，吞掉了 +\(delta) 个 Token！😋",
+                "Claude 饱餐了 +\(delta) 个 Token！🍲",
+                "刚刚召唤了 +\(delta) 个 Token！✨",
+                "呼哧呼哧...搞定了 +\(delta)！📝",
+                "脑暴中！消耗了 +\(delta) 🧠",
+                "完成！吞噬了 +\(delta) 个 Token 🚀"
+            ],
+            [
+                "咕嚕，吞掉了 +\(delta) 個 Token！😋",
+                "Claude 飽餐了 +\(delta) 個 Token！🍲",
+                "剛剛召喚了 +\(delta) 個 Token！✨",
+                "呼哧呼哧...搞定了 +\(delta)！📝",
+                "腦暴中！消耗了 +\(delta) 🧠",
+                "完成！吞噬了 +\(delta) 個 Token 🚀"
+            ],
+            [
+                "ゴクッ！+\(delta) トークンを飲み込みました！😋",
+                "Claude が +\(delta) トークンを平らげました！🍲",
+                "+\(delta) トークンを召喚しました！✨",
+                "ふぅふぅ...+\(delta) トークンを処理しました！📝",
+                "ブレインストーミング中！+\(delta) トークン消費 🧠",
+                "完了！+\(delta) トークンを吸収しました 🚀"
+            ],
+            [
+                "꿀꺽! 토큰 +\(delta)개 삼켰어요! 😋",
+                "Claude가 +\(delta)개 토큰을 해치웠어요! 🍲",
+                "토큰 +\(delta)개 소환 완료! ✨",
+                "영차영차... +\(delta)개 처리했어요! 📝",
+                "브레인스토밍 중! 토큰 +\(delta)개 소비 🧠",
+                "완료! 토큰 +\(delta)개 삼켰습니다 🚀"
+            ]
+        )
+        return pool.randomElement() ?? "AI Model · +\(delta)"
     }
 }

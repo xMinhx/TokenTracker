@@ -147,12 +147,24 @@ const PET_STATE_TO_PATH = {
   "idle-living": "idle/living.svg",
   "idle-look": "idle/look.svg",
   "idle-doze": "idle/doze.svg",
+  "yawning": "idle/yawn.svg",
+  "collapsing": "idle/collapse.svg",
+  "waking": "sleep/wake.svg",
   "working-typing": "working/typing.svg",
   "working-ultrathink": "working/ultrathink.svg",
   "sleeping": "sleep/sleeping.svg",
   "disconnected": "status/disconnected.svg",
   "error": "status/error.svg",
   "static-base": "static-base.svg",
+  // Mini mode variants
+  "mini-idle": "mini/idle.svg",
+  "mini-peek": "mini/peek.svg",
+  "mini-alert": "mini/alert.svg",
+  "mini-happy": "mini/happy.svg",
+  "mini-sleep": "mini/sleep.svg",
+  "mini-enter": "mini/enter.svg",
+  "mini-enter-sleep": "mini/enter-sleep.svg",
+  "mini-crabwalk": "mini/crabwalk.svg",
 };
 
 const petSvgCache = new Map();
@@ -293,11 +305,57 @@ function Pet() {
   const [hovering, setHovering] = useState(false);
   const [leanX, setLeanX] = useState(0); // −1..+1, cursor offset from center while hovering
   const [size, setSize] = useState(sizeFor);
+  const [miniMode, setMiniMode] = useState(false);
+  const [sleepState, setSleepState] = useState(null);
+  const [modelStatus, setModelStatus] = useState(null);
   const dragRef = useRef(null);
   const tapIndexRef = useRef(0);
   const quipIndexRef = useRef(0); // rotates through the quip pool on each tap (macOS quipIndex)
   const tapTimer = useRef(0);
   const idleTimer = useRef(0);
+  const wakeTimer = useRef(0);
+  const modelStatusTimer = useRef(0);
+
+  // Subscribe to miniMode, sleep, and model status updates pushed by the host.
+  useEffect(() => {
+    const update = () => setMiniMode(Boolean(window.__ttPetMiniMode));
+    update();
+    window.addEventListener("pet:minimode", update);
+    return () => window.removeEventListener("pet:minimode", update);
+  }, []);
+
+  useEffect(() => {
+    const handleWake = () => {
+      clearTimeout(wakeTimer.current);
+      setSleepState("waking");
+      wakeTimer.current = setTimeout(() => setSleepState(null), 1500);
+    };
+    const handleSleep = (e) => {
+      clearTimeout(wakeTimer.current);
+      setSleepState(e.detail?.phase || "sleeping");
+    };
+    window.addEventListener("pet:wake", handleWake);
+    window.addEventListener("pet:sleep", handleSleep);
+    return () => {
+      clearTimeout(wakeTimer.current);
+      window.removeEventListener("pet:wake", handleWake);
+      window.removeEventListener("pet:sleep", handleSleep);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleModelStatus = (e) => {
+      clearTimeout(modelStatusTimer.current);
+      setModelStatus(e.detail || null);
+      // Auto-clear so the increment bubble is transient (parity with macOS' 3s timer).
+      modelStatusTimer.current = setTimeout(() => setModelStatus(null), 3000);
+    };
+    window.addEventListener("pet:model-status", handleModelStatus);
+    return () => {
+      clearTimeout(modelStatusTimer.current);
+      window.removeEventListener("pet:model-status", handleModelStatus);
+    };
+  }, []);
 
   // Usage + connection are pushed by the native host (same numbers the tray shows),
   // so the pet never drifts from the app and does no independent polling.
@@ -402,6 +460,36 @@ function Pet() {
   else if (today.tokens === 0) autoState = "sleeping";
   else autoState = idleVariant;
 
+  // Apply sleep/wake override — but never mask an active working/error/disconnected
+  // state (parity with macOS: the pet shouldn't doze mid-sync).
+  const busy =
+    autoState === "working-typing" ||
+    autoState === "error" ||
+    autoState === "disconnected";
+  if (sleepState && !busy) {
+    autoState = sleepState;
+  }
+
+  // Mini mode state redirection
+  if (miniMode) {
+    if (autoState === "error" || autoState === "disconnected") {
+      autoState = "mini-alert";
+    } else if (
+      autoState === "sleeping" ||
+      autoState === "yawning" ||
+      autoState === "collapsing" ||
+      autoState === "idle-doze"
+    ) {
+      autoState = "mini-sleep";
+    } else if (autoState === "waking") {
+      autoState = "mini-enter";
+    } else if (autoState === "working-typing") {
+      autoState = "mini-crabwalk";
+    } else {
+      autoState = hovering ? "mini-peek" : "mini-idle";
+    }
+  }
+
   const state = tapState || autoState;
 
   // Tap → reaction animation + a spoken quip (macOS handleTap parity), both held
@@ -477,7 +565,16 @@ function Pet() {
       : today.tokens > 0
         ? `${L.today} ${formatTokens(today.tokens)} · ${currency.symbol}${(today.costUsd * currency.rate).toFixed(2)}`
         : L.noUsage;
-  const bubbleText = speech ?? (hovering ? usageText : null);
+
+  let bubbleText = speech;
+  if (!bubbleText) {
+    if (modelStatus) {
+      const costValue = modelStatus.costDelta * currency.rate;
+      bubbleText = `${modelStatus.modelName} · +${formatTokens(modelStatus.tokensDelta)} (${currency.symbol}${costValue.toFixed(3)})`;
+    } else if (hovering) {
+      bubbleText = usageText;
+    }
+  }
 
   return (
     <div

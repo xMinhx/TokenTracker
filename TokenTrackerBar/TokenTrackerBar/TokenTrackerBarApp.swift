@@ -56,10 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             await serverManager.ensureServerRunning()
-            if serverManager.isServerRunning {
+            let serverHealthy = await APIClient.shared.checkServerHealth()
+            let isOnline = serverManager.isServerRunning || serverHealthy
+            if isOnline {
                 await viewModel.syncThenLoad()
-                viewModel.startAutoRefresh()
             }
+            viewModel.startAutoRefresh()
 
             UpdateChecker.shared.check(silent: true)
         }

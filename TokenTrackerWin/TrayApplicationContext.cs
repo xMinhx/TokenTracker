@@ -38,6 +38,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     // live in two menus at once).
     private readonly ContextMenuStrip _petMenu;
     private readonly ToolStripMenuItem _petCtxOpen;
+    private readonly ToolStripMenuItem _petCtxSync;
     private readonly ToolStripMenuItem _petCtxSizeItem;
     private readonly ToolStripMenuItem _petCtxSizeSmall;
     private readonly ToolStripMenuItem _petCtxSizeMedium;
@@ -82,6 +83,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // Pet right-click context menu: open/close dashboard / size / close pet.
         // The first item toggles the dashboard; its label flips to "Close" while it's open.
         _petCtxOpen = CreateMenuItem("", (_, _) => ToggleDashboard());
+        _petCtxSync = CreateMenuItem("", (_, _) => _server.TriggerSync());
         _petCtxSizeSmall = CreateMenuItem("", (_, _) => SetPetSize(PetWindow.SizeSmall));
         _petCtxSizeMedium = CreateMenuItem("", (_, _) => SetPetSize(PetWindow.SizeMedium));
         _petCtxSizeLarge = CreateMenuItem("", (_, _) => SetPetSize(PetWindow.SizeLarge));
@@ -102,6 +104,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             ShowImageMargin = false,
         };
         _petMenu.Items.Add(_petCtxOpen);
+        _petMenu.Items.Add(_petCtxSync);
         _petMenu.Items.Add(_petCtxSizeItem);
         _petMenu.Items.Add(CreateSeparator());
         _petMenu.Items.Add(_petCtxClose);
@@ -260,6 +263,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // Pet right-click context menu.
         _petMenu.Font = _menuFont;
         _petCtxOpen.Text = _strings.OpenDashboard;
+        _petCtxSync.Text = _strings.SyncNow;
         _petCtxSizeItem.Text = _strings.PetSize;
         _petCtxSizeSmall.Text = _strings.SizeSmall;
         _petCtxSizeMedium.Text = _strings.SizeMedium;
