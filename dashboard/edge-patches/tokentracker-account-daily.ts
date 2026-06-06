@@ -409,6 +409,10 @@ export default async function (req: Request): Promise<Response> {
     cache_creation_input_tokens: number;
     reasoning_output_tokens: number;
     conversation_count: number;
+    // Per-model token totals for the day, so the dashboard Usage Trend can stack
+    // by MODEL in cloud (account) mode — mirrors src/lib/local-api.js daily output.
+    // Without this the trend falls back to a token-type breakdown in cloud mode.
+    models: Record<string, number>;
   }>();
   for (const row of rows) {
     if (!row.hour_start) continue;
@@ -427,6 +431,7 @@ export default async function (req: Request): Promise<Response> {
         cache_creation_input_tokens: 0,
         reasoning_output_tokens: 0,
         conversation_count: 0,
+        models: {},
       };
       byDay.set(day, a);
     }
@@ -440,6 +445,8 @@ export default async function (req: Request): Promise<Response> {
     a.cache_creation_input_tokens += Number(row.cache_creation_input_tokens) || 0;
     a.reasoning_output_tokens += Number(row.reasoning_output_tokens) || 0;
     a.conversation_count += Number(row.conversations) || 0;
+    const mdl = String(row.model || "unknown");
+    a.models[mdl] = (a.models[mdl] || 0) + tt;
   }
 
   const data = Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));

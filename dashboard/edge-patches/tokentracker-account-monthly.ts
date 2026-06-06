@@ -177,6 +177,9 @@ export default async function (req: Request): Promise<Response> {
     cache_creation_input_tokens: number;
     reasoning_output_tokens: number;
     conversation_count: number;
+    // Per-model totals so the Usage Trend (total/monthly mode) can stack by
+    // MODEL in cloud mode — mirrors src/lib/local-api.js monthly output.
+    models: Record<string, number>;
   }>();
 
   for (const row of rows) {
@@ -196,6 +199,7 @@ export default async function (req: Request): Promise<Response> {
         cache_creation_input_tokens: 0,
         reasoning_output_tokens: 0,
         conversation_count: 0,
+        models: {},
       };
       byMonth.set(month, a);
     }
@@ -208,6 +212,8 @@ export default async function (req: Request): Promise<Response> {
     a.cache_creation_input_tokens += Number(row.cache_creation_input_tokens) || 0;
     a.reasoning_output_tokens += Number(row.reasoning_output_tokens) || 0;
     a.conversation_count += Number(row.conversations) || 0;
+    const mdl = String(row.model || "unknown");
+    a.models[mdl] = (a.models[mdl] || 0) + tt;
   }
 
   const data = Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month));

@@ -244,6 +244,9 @@ export default async function (req: Request): Promise<Response> {
     cache_creation_input_tokens: number;
     reasoning_output_tokens: number;
     conversation_count: number;
+    // Per-model totals so the Usage Trend (day/hourly mode) can stack by MODEL
+    // in cloud mode — mirrors src/lib/local-api.js aggregateHourlyByDay output.
+    models: Record<string, number>;
   }>();
   for (const row of rows) {
     if (!row.hour_start) continue;
@@ -263,6 +266,7 @@ export default async function (req: Request): Promise<Response> {
         cache_creation_input_tokens: 0,
         reasoning_output_tokens: 0,
         conversation_count: 0,
+        models: {},
       };
       byHour.set(hourKey, bucket);
     }
@@ -275,6 +279,8 @@ export default async function (req: Request): Promise<Response> {
     bucket.cache_creation_input_tokens += Number(row.cache_creation_input_tokens) || 0;
     bucket.reasoning_output_tokens += Number(row.reasoning_output_tokens) || 0;
     bucket.conversation_count += Number(row.conversations) || 0;
+    const mdl = String(row.model || "unknown");
+    bucket.models[mdl] = (bucket.models[mdl] || 0) + tt;
   }
 
   const data = Array.from(byHour.values()).sort((a, b) => a.hour.localeCompare(b.hour));

@@ -197,19 +197,23 @@ export default async function (req: Request): Promise<Response> {
 
   const rows = rawRows;
 
-  const byDay = new Map<string, { total_tokens: number; billable_total_tokens: number }>();
+  const byDay = new Map<string, { total_tokens: number; billable_total_tokens: number; models: Record<string, number> }>();
   for (const row of rows) {
     if (!row.hour_start) continue;
     const day = zonedDayKey(String(row.hour_start), tz, tzOffsetMinutes);
     if (day < from || day > to) continue;
     let a = byDay.get(day);
     if (!a) {
-      a = { total_tokens: 0, billable_total_tokens: 0 };
+      a = { total_tokens: 0, billable_total_tokens: 0, models: {} };
       byDay.set(day, a);
     }
     const tt = Number(row.total_tokens) || 0;
     a.total_tokens += tt;
     a.billable_total_tokens += tt;
+    // Per-model totals so the activity-heatmap tooltip can show MODEL breakdown
+    // in cloud mode — mirrors src/lib/local-api.js heatmap cells.
+    const mdl = String(row.model || "unknown");
+    a.models[mdl] = (a.models[mdl] || 0) + tt;
   }
 
   const allValues = Array.from(byDay.values())
@@ -226,7 +230,7 @@ export default async function (req: Request): Promise<Response> {
     return 4;
   };
 
-  const cells: { day: string; total_tokens: number; billable_total_tokens: number; level: number }[] = [];
+  const cells: { day: string; total_tokens: number; billable_total_tokens: number; level: number; models: Record<string, number> | null }[] = [];
   const cursor = new Date(start);
   while (cursor <= end) {
     const day = cursor.toISOString().slice(0, 10);
@@ -237,6 +241,7 @@ export default async function (req: Request): Promise<Response> {
       total_tokens: data?.total_tokens || 0,
       billable_total_tokens: billable,
       level: calcLevel(billable),
+      models: data?.models || null,
     });
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
