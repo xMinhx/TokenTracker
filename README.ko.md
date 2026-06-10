@@ -23,6 +23,8 @@
   <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard" width="820" />
 </video>
 
+<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline poster="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" width="820"></video>
+
 <br/><br/>
 
 ⭐ **TokenTracker가 시간을 아껴줬다면 [GitHub에서 스타를 눌러주세요](https://github.com/mm7894215/TokenTracker) — 다른 개발자들이 이 프로젝트를 발견하는 데 도움이 됩니다.**
@@ -103,15 +105,6 @@ brew install mm7894215/tokentracker/tokentracker
 ## 🖼️ 쇼케이스
 
 <table>
-<tr>
-<td colspan="2">
-
-**대시보드 둘러보기** — 실제 대시보드 45초 투어
-
-<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline width="100%"></video>
-
-</td>
-</tr>
 <tr>
 <td width="50%">
 

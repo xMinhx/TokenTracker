@@ -23,6 +23,8 @@
   <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard" width="820" />
 </video>
 
+<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline poster="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" width="820"></video>
+
 <br/><br/>
 
 ⭐ **TokenTracker が時間の節約に役立ったら、ぜひ [GitHub でスターを付けてください](https://github.com/mm7894215/TokenTracker) — 他の開発者が見つけやすくなります。**
@@ -103,15 +105,6 @@ brew install mm7894215/tokentracker/tokentracker
 ## 🖼️ ショーケース
 
 <table>
-<tr>
-<td colspan="2">
-
-**ダッシュボードツアー** — 実際の画面を 45 秒で紹介
-
-<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline width="100%"></video>
-
-</td>
-</tr>
 <tr>
 <td width="50%">
 

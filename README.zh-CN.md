@@ -23,6 +23,8 @@
   <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard" width="820" />
 </video>
 
+<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline poster="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" width="820"></video>
+
 <br/><br/>
 
 ⭐ **如果 TokenTracker 帮你省了时间，欢迎 [在 GitHub 上 Star](https://github.com/mm7894215/TokenTracker) —— 可以让更多开发者发现它。**
@@ -105,15 +107,6 @@ brew install mm7894215/tokentracker/tokentracker
 ## 🖼️ 截图
 
 <table>
-<tr>
-<td colspan="2">
-
-**操作演示** — 45 秒真实仪表盘完整浏览
-
-<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline width="100%"></video>
-
-</td>
-</tr>
 <tr>
 <td width="50%">
 

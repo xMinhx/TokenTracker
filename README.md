@@ -25,6 +25,8 @@ Auto-collect token counts from **22 AI coding tools**, aggregate them locally, a
   <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard" width="820" />
 </video>
 
+<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline poster="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" width="820"></video>
+
 <br/><br/>
 
 ⭐ **If TokenTracker saves you time, please [star it on GitHub](https://github.com/mm7894215/TokenTracker) — it helps other developers find it.**
@@ -107,15 +109,6 @@ Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap 
 ## 🖼️ Showcase
 
 <table>
-<tr>
-<td colspan="2">
-
-**Dashboard walkthrough** — a 45-second tour of the real dashboard
-
-<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline width="100%"></video>
-
-</td>
-</tr>
 <tr>
 <td width="50%">
 
