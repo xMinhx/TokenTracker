@@ -2,7 +2,7 @@
   "_meta": {
     "note": "Curated price overrides. Always wins over LiteLLM. Two reasons to live here: (1) self-defined alias names that LiteLLM will never carry (kiro-*, hy3-*, composer-*, kimi-for-coding, free-tier OpenRouter routes); (2) prices we want to pin even if LiteLLM has the model (e.g. cache_write fields LiteLLM often omits). Units: USD per million tokens. Edit this file to override pricing without redeploying.",
     "units": "usd_per_million_tokens",
-    "deepseek_v4_pro_discount_expiry": "2026-05-31T15:59:00Z — DeepSeek v4-pro is currently at a 75% promotional discount. After expiry the prices revert to 4x: input $1.74/M, output $3.48/M, cache_read $0.0145/M, cache_write $1.74/M. Update this file before the cutover."
+    "deepseek_v4_pro_pricing_note": "The 2026-05-31 promotional-expiry warning is obsolete: api-docs.deepseek.com/quick_start/pricing verified on 2026-06-10 still lists input $0.435/M, output $0.87/M, cache_read $0.003625/M as the official v4-pro rates (the discount became the list price). Do NOT 'restore' the old 4x rates; re-verify against the official page before any change."
   },
   "exact": {
     "claude-fable-5":   { "input": 10,   "output": 50,   "cache_read": 1,     "cache_write": 12.5, "note": "Fable 5 — Anthropic's top tier above Opus. Not yet in LiteLLM. $10/$50 per MTok; cache_read 0.1x, cache_write 1.25x. Remove once LiteLLM carries it." },
@@ -63,6 +63,7 @@
     { "match": "minimax-m2.7",           "ref": "MiniMax-M2.7" },
     { "match": "deepseek-v4-flash",      "ref": "deepseek-v4-flash" },
     { "match": "deepseek-v4-pro",        "ref": "deepseek-v4-pro" },
+    { "match": "kimi-k2.6",              "ref": "kimi-k2.6" },
     { "match": "kimi",                   "ref": "kimi-k2.5" },
     { "match": "glm-4.5-airx",           "ref": "glm-4.5-airx" },
     { "match": "glm-4.5-air",            "ref": "glm-4.5-air" },

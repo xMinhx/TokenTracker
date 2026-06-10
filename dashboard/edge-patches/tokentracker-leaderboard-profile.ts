@@ -90,6 +90,7 @@ function getClient() {
 
 // ─────────────────────────── Pricing (mirror from refresh.ts) ──────────────────────────
 const MODEL_PRICING: Record<string, { input: number; output: number; cache_read: number; cache_write?: number }> = {
+  // ── Anthropic Claude ──
   "claude-fable-5": { input: 10, output: 50, cache_read: 1, cache_write: 12.5 },
   "claude-opus-4-6": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
   "claude-opus-4-5-20250414": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
@@ -99,6 +100,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "claude-haiku-4-5-20251001": { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
   "claude-3-5-sonnet-20241022": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
   "claude-3-5-haiku-20241022": { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
+  // ── OpenAI GPT / Codex ──
   "gpt-5": { input: 1.25, output: 10, cache_read: 0.125 },
   "gpt-5-fast": { input: 1.25, output: 10, cache_read: 0.125 },
   "gpt-5-high": { input: 1.25, output: 10, cache_read: 0.125 },
@@ -121,10 +123,16 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "gpt-5.3-codex-high": { input: 1.75, output: 14, cache_read: 0.175 },
   "gpt-5.4": { input: 2.5, output: 15, cache_read: 0.25 },
   "gpt-5.4-mini": { input: 0.75, output: 4.5, cache_read: 0.075 },
-  "gpt-5.4-medium": { input: 1.5, output: 10, cache_read: 0.15 },
+  // gpt-5.4-pro per developers.openai.com/api/docs/pricing; cache_read 3
+  // mirrors the local LiteLLM entry. There is NO "-medium" SKU —
+  // medium/high/xhigh are reasoning-effort levels billed at the base rate;
+  // a stale "gpt-5.4-medium" 1.5/10 entry here undercut the local engine
+  // (suffix-strip → gpt-5.4 at 2.5/15) by 40% until 2026-06.
+  "gpt-5.4-pro": { input: 30, output: 180, cache_read: 3 },
   "gpt-5.5": { input: 5, output: 30, cache_read: 0.5 },
   "gpt-5-mini": { input: 0.25, output: 2, cache_read: 0.025 },
   "o3": { input: 2, output: 8, cache_read: 0.5 },
+  // ── Google Gemini ──
   "gemini-2.5-pro": { input: 1.25, output: 10, cache_read: 0.125 },
   "gemini-2.5-pro-preview-06-05": { input: 1.25, output: 10, cache_read: 0.125 },
   "gemini-2.5-pro-preview-05-06": { input: 1.25, output: 10, cache_read: 0.125 },
@@ -132,13 +140,22 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "gemini-3-flash-preview": { input: 0.5, output: 3, cache_read: 0.05 },
   "gemini-3-pro-preview": { input: 2, output: 12, cache_read: 0.2 },
   "gemini-3.1-pro-preview": { input: 2, output: 12, cache_read: 0.2 },
+  // ── Cursor Composer ──
   "composer-1": { input: 1.25, output: 10, cache_read: 0.125 },
   "composer-1.5": { input: 3.5, output: 17.5, cache_read: 0.35 },
   "composer-2": { input: 0.5, output: 2.5, cache_read: 0.2 },
   "composer-2-fast": { input: 1.5, output: 7.5, cache_read: 0.15 },
+  // ── Moonshot Kimi ──
   "kimi-for-coding": { input: 0.6, output: 2, cache_read: 0.15 },
   "kimi-k2.5": { input: 0.6, output: 2, cache_read: 0.15 },
   "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
+  "kimi-k2.6": { input: 0.95, output: 4, cache_read: 0.16 },
+  // ── Z.ai GLM (mirrored from src/lib/pricing/curated-overrides.json).
+  //    LiteLLM only keys these under provider prefixes like `zai/glm-5`,
+  //    `openrouter/z-ai/glm-4.6`, etc. The reverse-substring fallback in the
+  //    matcher requires the user-supplied model name to CONTAIN the LiteLLM
+  //    key, so the bare `glm-5.1` / `glm-4.6` strings reported by Claude
+  //    Code-compatible GLM endpoints never match. Curate them here. ──
   "glm-5.1": { input: 1.4, output: 4.4, cache_read: 0.26 },
   "glm-5": { input: 1.0, output: 3.2, cache_read: 0.2 },
   "glm-5-turbo": { input: 1.2, output: 4.0, cache_read: 0.24 },
@@ -151,12 +168,16 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "glm-4.5-air": { input: 0.2, output: 1.1, cache_read: 0.03 },
   "glm-4.5-airx": { input: 1.1, output: 4.5, cache_read: 0.22 },
   "glm-4.5-flash": { input: 0, output: 0, cache_read: 0 },
+  // ── MiniMax / DeepSeek ──
   "MiniMax-M2.7": { input: 0.3, output: 1.2, cache_read: 0.06, cache_write: 0.375 },
   "MiniMax-M2.7-highspeed": { input: 0.6, output: 2.4, cache_read: 0.06, cache_write: 0.375 },
   "deepseek-v4-flash": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
   "deepseek-v4-pro": { input: 0.435, output: 0.87, cache_read: 0.003625, cache_write: 0.435 },
   "deepseek-chat": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
   "deepseek-reasoner": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
+  // ── xAI Grok (mirrored from src/lib/pricing/curated-overrides.json;
+  //    Grok parser emits cache_creation_input_tokens = 0, so cache_write is
+  //    omitted — same as the canonical table). ──
   "grok-build": { input: 1.25, output: 2.50, cache_read: 0.20 },
   "grok-4-0709": { input: 3.00, output: 15.00, cache_read: 0.75 },
   "grok-4": { input: 3.00, output: 15.00, cache_read: 0.75 },
@@ -165,15 +186,30 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "grok-4-fast-reasoning": { input: 0.20, output: 0.50, cache_read: 0.05 },
   "grok-4-fast-non-reasoning": { input: 0.20, output: 0.50, cache_read: 0.05 },
   "grok-4-1-fast-non-reasoning": { input: 0.20, output: 0.50, cache_read: 0.05 },
+  // ── AWS Kiro (mirrored byte-for-byte from src/lib/local-api.js to
+  //    prevent cloud/local cost drift — Kiro routes through Bedrock,
+  //    most commonly claude-sonnet-4). ──
   "kiro-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
   "kiro-cli-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+  // ── Tencent CodeBuddy (hy3-preview family). Mirrored from
+  //    src/lib/local-api.js — Tencent has not published $/MTok rates so
+  //    these stay at 0. TODO: confirm Tencent hy3 pricing. ──
   "hy3-preview-agent": { input: 0, output: 0, cache_read: 0 },
   "hy3-preview": { input: 0, output: 0, cache_read: 0 },
+  // ── Misc / Free ──
   "glm-4.7-free": { input: 0, output: 0, cache_read: 0 },
   "nemotron-3-super-free": { input: 0, output: 0, cache_read: 0 },
   "mimo-v2-pro-free": { input: 0, output: 0, cache_read: 0 },
   "minimax-m2.1-free": { input: 0, output: 0, cache_read: 0 },
   "MiniMax-M2.1": { input: 0.5, output: 3, cache_read: 0.05 },
+  // ── Xiaomi MiMo (mirrored from src/lib/pricing/seed-snapshot.json LiteLLM
+  //    entries openrouter/xiaomi/mimo-*; queue rows report the bare names.
+  //    Kept in lockstep with the matcher's litellm:prefix-strip resolution —
+  //    cache_read for mimo-v2-flash uses novita's 0.02 (the lexicographically
+  //    smallest provider key the matcher deterministically picks). ──
+  "mimo-v2.5-pro": { input: 1, output: 3, cache_read: 0.2 },
+  "mimo-v2.5": { input: 0.4, output: 2, cache_read: 0.08 },
+  "mimo-v2-flash": { input: 0.1, output: 0.3, cache_read: 0.02 },
 };
 const ZERO_PRICING = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
 
@@ -186,13 +222,20 @@ function getModelPricing(model: string) {
   if (lower.includes("opus")) return MODEL_PRICING["claude-opus-4-6"];
   if (lower.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
   if (lower.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
+  if (lower.includes("gpt-5.4-pro")) return MODEL_PRICING["gpt-5.4-pro"];
   if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
   if (lower.includes("gpt-5.5")) return MODEL_PRICING["gpt-5.5"];
   if (lower.includes("gpt-5-mini")) return MODEL_PRICING["gpt-5-mini"];
   if (lower.includes("gpt-5.3")) return MODEL_PRICING["gpt-5.3-codex"];
   if (lower.includes("gpt-5.2")) return MODEL_PRICING["gpt-5.2"];
+  // -codex-mini variants (e.g. gpt-5.1-codex-mini-high) must resolve before
+  // the broader gpt-5.1 matcher — the base codex rate is 5x the mini rate.
+  if (lower.includes("gpt-5.1-codex-mini")) return MODEL_PRICING["gpt-5.1-codex-mini"];
   if (lower.includes("gpt-5.1")) return MODEL_PRICING["gpt-5.1-codex"];
   if (lower.includes("gpt-5")) return MODEL_PRICING["gpt-5"];
+  // gemini-3 pro tiers (gemini-3-pro, gemini-3.1-pro, -high, -customtools…)
+  // must not fall through to the flash rate (4x undercount).
+  if (lower.includes("gemini-3") && lower.includes("pro")) return MODEL_PRICING["gemini-3-pro-preview"];
   if (lower.includes("gemini-3")) return MODEL_PRICING["gemini-3-flash-preview"];
   if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
   if (lower.includes("minimax-m2.7-highspeed")) return MODEL_PRICING["MiniMax-M2.7-highspeed"];
@@ -203,9 +246,24 @@ function getModelPricing(model: string) {
   if (lower.includes("deepseek-chat")) return MODEL_PRICING["deepseek-chat"];
   if (lower.includes("grok-build")) return MODEL_PRICING["grok-build"];
   if (lower.includes("grok-4-fast")) return MODEL_PRICING["grok-4-fast"];
+  // grok-4-1-fast-* must precede the generic grok-4 matcher. Cloud rows may
+  // carry a provider prefix or `-latest` suffix (e.g. xai/grok-4-1-fast-
+  // non-reasoning-latest), and the substring "grok-4-fast" does NOT match
+  // "grok-4-1-fast" (the "-1-" separates them). Without this specific match
+  // these rows fall through to grok-4 and get billed at $3/$15 MTok instead
+  // of the $0.20/$0.50 MTok fast-tier rate (15x / 30x overestimate).
   if (lower.includes("grok-4-1-fast")) return MODEL_PRICING["grok-4-1-fast-non-reasoning"];
   if (lower.includes("grok-4")) return MODEL_PRICING["grok-4"];
+  if (lower.includes("kimi-k2.6")) return MODEL_PRICING["kimi-k2.6"];
   if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
+  // MiMo ordering: more specific suffixes first (mimo-v2.5-pro before
+  // mimo-v2.5 which is a substring; the free tier is a distinct name).
+  if (lower.includes("mimo-v2-pro-free")) return MODEL_PRICING["mimo-v2-pro-free"];
+  if (lower.includes("mimo-v2.5-pro")) return MODEL_PRICING["mimo-v2.5-pro"];
+  if (lower.includes("mimo-v2.5")) return MODEL_PRICING["mimo-v2.5"];
+  if (lower.includes("mimo-v2-flash")) return MODEL_PRICING["mimo-v2-flash"];
+  // GLM ordering: more specific suffixes (-airx/-air/-x/-flash/-flashx/-turbo)
+  // must precede the base matchers. glm-5.1 must precede glm-5 (substring).
   if (lower.includes("glm-4.5-airx")) return MODEL_PRICING["glm-4.5-airx"];
   if (lower.includes("glm-4.5-air")) return MODEL_PRICING["glm-4.5-air"];
   if (lower.includes("glm-4.5-x")) return MODEL_PRICING["glm-4.5-x"];

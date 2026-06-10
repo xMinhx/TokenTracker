@@ -96,7 +96,10 @@ export default async function (req: Request): Promise<Response> {
     total_tokens: b.total_tokens || 0,
     billable_total_tokens: b.billable_total_tokens || 0,
     total_cost_usd: Number(b.total_cost_usd) || 0,
-    conversations: b.conversations || 0,
+    // The CLI queue rows name this field `conversation_count`; older upload
+    // paths sent `conversations`. Reading only `conversations` zeroed the
+    // column for every CLI upload since 2026-04-18 — accept both.
+    conversations: b.conversation_count ?? b.conversations ?? 0,
   }));
 
   // Dedupe within the batch by (hour_start, source, model), keeping the row

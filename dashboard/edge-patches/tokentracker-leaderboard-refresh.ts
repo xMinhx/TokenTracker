@@ -66,7 +66,12 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "gpt-5.3-codex-high": { input: 1.75, output: 14, cache_read: 0.175 },
   "gpt-5.4": { input: 2.5, output: 15, cache_read: 0.25 },
   "gpt-5.4-mini": { input: 0.75, output: 4.5, cache_read: 0.075 },
-  "gpt-5.4-medium": { input: 1.5, output: 10, cache_read: 0.15 },
+  // gpt-5.4-pro per developers.openai.com/api/docs/pricing; cache_read 3
+  // mirrors the local LiteLLM entry. There is NO "-medium" SKU —
+  // medium/high/xhigh are reasoning-effort levels billed at the base rate;
+  // a stale "gpt-5.4-medium" 1.5/10 entry here undercut the local engine
+  // (suffix-strip → gpt-5.4 at 2.5/15) by 40% until 2026-06.
+  "gpt-5.4-pro": { input: 30, output: 180, cache_read: 3 },
   "gpt-5.5": { input: 5, output: 30, cache_read: 0.5 },
   "gpt-5-mini": { input: 0.25, output: 2, cache_read: 0.025 },
   "o3": { input: 2, output: 8, cache_read: 0.5 },
@@ -160,13 +165,20 @@ function getModelPricing(model: string) {
   if (lower.includes("opus")) return MODEL_PRICING["claude-opus-4-6"];
   if (lower.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
   if (lower.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
+  if (lower.includes("gpt-5.4-pro")) return MODEL_PRICING["gpt-5.4-pro"];
   if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
   if (lower.includes("gpt-5.5")) return MODEL_PRICING["gpt-5.5"];
   if (lower.includes("gpt-5-mini")) return MODEL_PRICING["gpt-5-mini"];
   if (lower.includes("gpt-5.3")) return MODEL_PRICING["gpt-5.3-codex"];
   if (lower.includes("gpt-5.2")) return MODEL_PRICING["gpt-5.2"];
+  // -codex-mini variants (e.g. gpt-5.1-codex-mini-high) must resolve before
+  // the broader gpt-5.1 matcher — the base codex rate is 5x the mini rate.
+  if (lower.includes("gpt-5.1-codex-mini")) return MODEL_PRICING["gpt-5.1-codex-mini"];
   if (lower.includes("gpt-5.1")) return MODEL_PRICING["gpt-5.1-codex"];
   if (lower.includes("gpt-5")) return MODEL_PRICING["gpt-5"];
+  // gemini-3 pro tiers (gemini-3-pro, gemini-3.1-pro, -high, -customtools…)
+  // must not fall through to the flash rate (4x undercount).
+  if (lower.includes("gemini-3") && lower.includes("pro")) return MODEL_PRICING["gemini-3-pro-preview"];
   if (lower.includes("gemini-3")) return MODEL_PRICING["gemini-3-flash-preview"];
   if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
   if (lower.includes("minimax-m2.7-highspeed")) return MODEL_PRICING["MiniMax-M2.7-highspeed"];
