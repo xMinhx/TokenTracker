@@ -97,3 +97,6 @@ tasks/
 
 # Promo video work project (large media — not part of the repo)
 promo-video/
+
+# Local skill tooling lockfile (hyperframes — not part of the repo)
+skills-lock.json
