@@ -91,3 +91,9 @@ dashboard/.mcp.json
 
 # Security ops scripts & audit reports (contain vuln details / lockdown SQL — never commit to public repo)
 scripts/ops/
+
+# Local working notes (todo / lessons — not part of the repo)
+tasks/
+
+# Promo video work project (large media — not part of the repo)
+promo-video/
