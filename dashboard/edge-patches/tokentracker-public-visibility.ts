@@ -85,11 +85,10 @@ export default async function (req: Request): Promise<Response> {
   if (!userId) return json({ error: "Unauthorized" }, 401);
 
   const serviceRoleKey = Deno.env.get("INSFORGE_SERVICE_ROLE_KEY");
-  // 优先用 service role key 操作 DB，避免用户短期 JWT 过期导致 401
-  const dbToken = serviceRoleKey || token;
+  if (!serviceRoleKey) return json({ error: "server misconfigured" }, 500);
   const client = createClient({
     baseUrl,
-    edgeFunctionToken: dbToken,
+    edgeFunctionToken: serviceRoleKey,
     anonKey,
     ...(anonKey ? { headers: { apikey: anonKey } } : {}),
   });

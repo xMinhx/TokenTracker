@@ -88,3 +88,6 @@ scratch/
 
 # Local InsForge MCP config (contains full-access API_KEY — never commit)
 dashboard/.mcp.json
+
+# Security ops scripts & audit reports (contain vuln details / lockdown SQL — never commit to public repo)
+scripts/ops/

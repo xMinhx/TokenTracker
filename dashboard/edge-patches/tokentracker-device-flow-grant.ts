@@ -90,11 +90,11 @@ export default async function (req: Request): Promise<Response> {
   const serviceRoleKey = Deno.env.get("INSFORGE_SERVICE_ROLE_KEY");
   const anonKey = Deno.env.get("INSFORGE_ANON_KEY") ?? Deno.env.get("ANON_KEY");
   if (!baseUrl) return json({ error: "misconfigured" }, 500);
-  const dbToken = serviceRoleKey || anonKey;
+  if (!serviceRoleKey) return json({ error: "misconfigured" }, 500);
 
   const client = createClient({
     baseUrl,
-    edgeFunctionToken: dbToken,
+    edgeFunctionToken: serviceRoleKey,
     anonKey,
     ...(anonKey ? { headers: { apikey: anonKey } } : {}),
   });

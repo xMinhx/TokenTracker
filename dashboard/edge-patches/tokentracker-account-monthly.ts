@@ -145,11 +145,11 @@ export default async function (req: Request): Promise<Response> {
   const anonKey =
     Deno.env.get("INSFORGE_ANON_KEY") ?? Deno.env.get("ANON_KEY") ?? incomingApiKey ?? undefined;
   const serviceRoleKey = Deno.env.get("INSFORGE_SERVICE_ROLE_KEY");
-  const dbToken = serviceRoleKey || anonKey;
+  if (!serviceRoleKey) return json({ error: "server misconfigured" }, 500);
 
   const client = createClient({
     baseUrl,
-    edgeFunctionToken: dbToken,
+    edgeFunctionToken: serviceRoleKey,
     anonKey,
     ...(anonKey ? { headers: { apikey: anonKey } } : {}),
   });
@@ -225,4 +225,3 @@ export default async function (req: Request): Promise<Response> {
   const data = Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month));
   return json({ from, to, data });
 }
-

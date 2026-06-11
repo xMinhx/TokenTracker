@@ -97,6 +97,7 @@ export default async function (req: Request): Promise<Response> {
 
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   const serviceRoleKey = Deno.env.get("INSFORGE_SERVICE_ROLE_KEY");
+  if (!serviceRoleKey) return json({ error: "server misconfigured" }, 500);
   const adminMode = Boolean(serviceRoleKey && bearer === serviceRoleKey);
 
   let userId: string | null = null;
@@ -119,10 +120,9 @@ export default async function (req: Request): Promise<Response> {
     if (!userId) return json({ error: "Unauthorized" }, 401);
     // 用 service role key 操作 DB：用户身份已通过 JWT 签名验证（HS256 + JWT_SECRET），
     // 不再依赖用户的短期 access token（15 min 过期）做 DB 写入。
-    const dbToken = serviceRoleKey || bearer;
     dbClient = createClient({
       baseUrl,
-      edgeFunctionToken: dbToken,
+      edgeFunctionToken: serviceRoleKey,
       anonKey,
       ...(anonKey ? { headers: { apikey: anonKey } } : {}),
     });

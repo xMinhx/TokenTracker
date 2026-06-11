@@ -45,12 +45,11 @@ export default async function (req: Request): Promise<Response> {
     req.headers.get("apikey") ?? req.headers.get("Apikey") ?? req.headers.get("x-api-key") ?? undefined;
   const anonKey =
     Deno.env.get("INSFORGE_ANON_KEY") ?? Deno.env.get("ANON_KEY") ?? incomingApiKey ?? undefined;
-  // 优先用 service role key；未配置时用 anon key（RLS 未启用时可用）
-  const dbToken = serviceRoleKey || anonKey || deviceToken;
+  if (!serviceRoleKey) return json({ error: "server misconfigured" }, 500);
 
   const client = createClient({
     baseUrl,
-    edgeFunctionToken: dbToken,
+    edgeFunctionToken: serviceRoleKey,
     anonKey,
     ...(anonKey ? { headers: { apikey: anonKey } } : {}),
   });
