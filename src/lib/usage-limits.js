@@ -2146,7 +2146,11 @@ async function fetchUsageLimitsUncached({
     claude: withPlanLabel(claude, claudePlanType, "Claude"),
     codex: withPlanLabel(codex, codex.plan_type, "Codex"),
     cursor: withPlanLabel(cursor, cursor.membership_type, "Cursor"),
-    kimi: withPlanLabel(kimi, kimi.subscription_type || kimi.membership_level, "Kimi"),
+    // Kimi's subType (TYPE_PURCHASE/TYPE_EVENT) is the credit *source*, not a plan
+    // tier, and membership.level is an opaque enum (LEVEL_INTERMEDIATE) with no
+    // authoritative human-readable plan mapping. Both rendered as garbage like
+    // "Kimi Type_event" (issue #130), so show the bare brand instead.
+    kimi: withPlanLabel(kimi, null, "Kimi"),
     gemini: withPlanLabel(gemini, gemini.account_plan, "Gemini"),
     kiro: withPlanLabel(kiro, kiro.plan_name, "Kiro"),
     antigravity: withPlanLabel(antigravity, antigravity.account_plan, "Antigravity"),
