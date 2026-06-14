@@ -147,6 +147,7 @@ final class NativeBridge {
             ),
             "menuBarMaxItems": MenuBarDisplayPreferences.maxVisibleItems,
             "animatedIcon": UserDefaults.standard.object(forKey: "MenuBarAnimationEnabled") as? Bool ?? true,
+            "confettiOnReset": WeeklyLimitResetDetector.confettiEnabled(),
             "launchAtLogin": launchAtLoginValue,
             "launchAtLoginSupported": launchAtLoginSupported,
             "version": UpdateChecker.shared.currentVersion(),
@@ -187,6 +188,10 @@ final class NativeBridge {
             if let bool = value as? Bool {
                 UserDefaults.standard.set(bool, forKey: "MenuBarAnimationEnabled")
                 NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+            }
+        case "confettiOnReset":
+            if let bool = value as? Bool {
+                UserDefaults.standard.set(bool, forKey: WeeklyLimitResetDetector.confettiEnabledKey)
             }
         case "launchAtLogin":
             if let bool = value as? Bool {

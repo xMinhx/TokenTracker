@@ -5,6 +5,7 @@ struct LimitsSettingsView: View {
     @ObservedObject var store: LimitsSettingsStore
     @Environment(\.colorScheme) private var colorScheme
     @State private var draggingId: String?
+    @AppStorage(WeeklyLimitResetDetector.confettiEnabledKey) private var confettiOnReset = WeeklyLimitResetDetector.confettiEnabledDefault
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -30,6 +31,19 @@ struct LimitsSettingsView: View {
                 .controlSize(.small)
                 .labelsHidden()
                 .frame(width: 132)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+
+            HStack(spacing: 10) {
+                Text(Strings.confettiOnResetLabel)
+                    .font(.system(.body, design: .default))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Toggle("", isOn: $confettiOnReset)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)

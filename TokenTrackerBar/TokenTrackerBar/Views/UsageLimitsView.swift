@@ -8,6 +8,10 @@ struct UsageLimitsView: View {
     /// Width of the widest visible row label; all label columns match it so
     /// bars align without reserving space for labels that aren't on screen.
     @State private var labelColumnWidth: CGFloat = 0
+    /// Provider id whose explanation popover is open. Each provider block is
+    /// clickable (CodexBar-style); clicking opens a side popover that explains how
+    /// to read its bars. A click toggle — not hover — so nothing reflows/jitters.
+    @State private var explainingProvider: String?
     let limits: UsageLimitsResponse?
 
     /// At least one provider is configured and error-free.
@@ -64,28 +68,28 @@ struct UsageLimitsView: View {
 
             switch id {
             case "claude" where limits.claude.configured && limits.claude.error == nil:
-                groups.append(AnyView(toolSection(title: planTitle("Claude", limits.claude.planLabel), assetName: "ClaudeLogo") { claudeContent(limits.claude) }))
+                groups.append(AnyView(toolSection(id: id, title: planTitle("Claude", limits.claude.planLabel), assetName: "ClaudeLogo", toolName: "Claude", specs: claudeSpecs(limits.claude))))
             case "codex" where limits.codex.configured && limits.codex.error == nil:
-                groups.append(AnyView(toolSection(title: planTitle("Codex", limits.codex.planLabel), assetName: "CodexLogo") { codexContent(limits.codex) }))
+                groups.append(AnyView(toolSection(id: id, title: planTitle("Codex", limits.codex.planLabel), assetName: "CodexLogo", toolName: "Codex", specs: codexSpecs(limits.codex))))
             case "cursor" where limits.cursor.configured && limits.cursor.error == nil:
-                groups.append(AnyView(toolSection(title: planTitle("Cursor", limits.cursor.planLabel), assetName: "CursorLogo") { cursorContent(limits.cursor) }))
+                groups.append(AnyView(toolSection(id: id, title: planTitle("Cursor", limits.cursor.planLabel), assetName: "CursorLogo", toolName: "Cursor", specs: cursorSpecs(limits.cursor))))
             case "gemini" where limits.gemini.configured && limits.gemini.error == nil:
-                groups.append(AnyView(toolSection(title: planTitle("Gemini", limits.gemini.planLabel), assetName: "GeminiLogo") { geminiContent(limits.gemini) }))
+                groups.append(AnyView(toolSection(id: id, title: planTitle("Gemini", limits.gemini.planLabel), assetName: "GeminiLogo", toolName: "Gemini", specs: geminiSpecs(limits.gemini))))
             case "kimi":
                 if let kimi = limits.kimi, kimi.configured, kimi.error == nil {
-                    groups.append(AnyView(toolSection(title: planTitle("Kimi", kimi.planLabel), assetName: "KimiLogo") { kimiContent(kimi) }))
+                    groups.append(AnyView(toolSection(id: id, title: planTitle("Kimi", kimi.planLabel), assetName: "KimiLogo", toolName: "Kimi", specs: kimiSpecs(kimi), footnote: kimi.parallelLimit.map { Strings.kimiParallelLabel($0) })))
                 }
             case "kiro" where limits.kiro.configured && limits.kiro.error == nil:
-                groups.append(AnyView(toolSection(title: planTitle("Kiro", limits.kiro.planLabel), assetName: "KiroLogo") { kiroContent(limits.kiro) }))
+                groups.append(AnyView(toolSection(id: id, title: planTitle("Kiro", limits.kiro.planLabel), assetName: "KiroLogo", toolName: "Kiro", specs: kiroSpecs(limits.kiro))))
             case "grok":
                 if let grok = limits.grok, grok.configured, grok.error == nil {
-                    groups.append(AnyView(toolSection(title: planTitle("Grok Build", grok.planLabel), assetName: "GrokLogo") { grokContent(grok) }))
+                    groups.append(AnyView(toolSection(id: id, title: planTitle("Grok Build", grok.planLabel), assetName: "GrokLogo", toolName: "Grok Build", specs: grokSpecs(grok))))
                 }
             case "antigravity" where limits.antigravity.configured && limits.antigravity.error == nil:
-                groups.append(AnyView(toolSection(title: planTitle("Antigravity", limits.antigravity.planLabel), assetName: "AntigravityLogo") { antigravityContent(limits.antigravity) }))
+                groups.append(AnyView(toolSection(id: id, title: planTitle("Antigravity", limits.antigravity.planLabel), assetName: "AntigravityLogo", toolName: "Antigravity", specs: antigravitySpecs(limits.antigravity))))
             case "copilot":
                 if let copilot = limits.copilot, copilot.configured, copilot.error == nil {
-                    groups.append(AnyView(toolSection(title: planTitle("GitHub Copilot", copilot.planLabel), assetName: "CopilotLogo") { copilotContent(copilot) }))
+                    groups.append(AnyView(toolSection(id: id, title: planTitle("GitHub Copilot", copilot.planLabel), assetName: "CopilotLogo", toolName: "GitHub Copilot", specs: copilotSpecs(copilot))))
                 }
             default:
                 break
@@ -96,12 +100,19 @@ struct UsageLimitsView: View {
 
     // MARK: - Tool Section
 
-    private func toolSection<Content: View>(
+    private func toolSection(
+        id: String,
         title: String,
         assetName: String?,
-        @ViewBuilder content: () -> Content
+        toolName: String,
+        specs: [LimitWindowSpec],
+        footnote: String? = nil
     ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        let isOpen = Binding(
+            get: { explainingProvider == id },
+            set: { explainingProvider = $0 ? id : nil }
+        )
+        return VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 5) {
                 if let assetName {
                     brandIcon(assetName)
@@ -111,161 +122,141 @@ struct UsageLimitsView: View {
                     .font(.system(.caption, design: .default))
                     .modifier(FontWeightModifier(weight: .medium))
             }
-            content()
-        }
-    }
-
-    // MARK: - Claude
-
-    private func claudeContent(_ claude: ClaudeLimits) -> some View {
-        VStack(spacing: 4) {
-            if let w = claude.fiveHour {
-                limitRow(label: "5h", pct: w.utilization, reset: relativeReset(iso: w.resetsAt), toolName: "Claude")
+            VStack(spacing: 4) {
+                ForEach(specs) { spec in
+                    limitRow(label: spec.label, pct: spec.pct, reset: spec.resetText, toolName: toolName, windowSeconds: spec.windowSeconds, resetDate: spec.resetDate)
+                }
             }
-            if let w = claude.sevenDay {
-                limitRow(label: "7d", pct: w.utilization, reset: relativeReset(iso: w.resetsAt), toolName: "Claude")
-            }
-            if let w = claude.sevenDayOpus {
-                limitRow(label: "Opus", pct: w.utilization, reset: relativeReset(iso: w.resetsAt), toolName: "Claude")
-            }
-        }
-    }
-
-    // MARK: - Codex
-
-    private func codexContent(_ codex: CodexLimits) -> some View {
-        VStack(spacing: 4) {
-            if let w = codex.primaryWindow {
-                limitRow(label: "5h", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
-            }
-            if let w = codex.secondaryWindow {
-                limitRow(label: "7d", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
-            }
-            if let w = codex.sparkPrimaryWindow {
-                limitRow(label: "Spark 5h", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
-            }
-            if let w = codex.sparkSecondaryWindow {
-                limitRow(label: "Spark 7d", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
-            }
-        }
-    }
-
-    // MARK: - Cursor
-
-    private func cursorContent(_ cursor: CursorLimits) -> some View {
-        VStack(spacing: 4) {
-            if let w = cursor.primaryWindow {
-                limitRow(label: Strings.cursorPlanLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
-            }
-            if let w = cursor.secondaryWindow {
-                limitRow(label: Strings.cursorAutoLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
-            }
-            if let w = cursor.tertiaryWindow {
-                limitRow(label: "API", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
-            }
-        }
-    }
-
-    // MARK: - Gemini
-
-    private func geminiContent(_ gemini: GeminiLimits) -> some View {
-        VStack(spacing: 4) {
-            if let w = gemini.primaryWindow {
-                limitRow(label: "Pro", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Gemini")
-            }
-            if let w = gemini.secondaryWindow {
-                limitRow(label: "Flash", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Gemini")
-            }
-            if let w = gemini.tertiaryWindow {
-                limitRow(label: "Lite", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Gemini")
-            }
-        }
-    }
-
-    // MARK: - Kimi
-
-    private func kimiContent(_ kimi: KimiLimits) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let w = kimi.primaryWindow {
-                limitRow(label: Strings.kimiWeeklyLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kimi")
-            }
-            if let w = kimi.secondaryWindow {
-                limitRow(label: Strings.kimiFiveHourLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kimi")
-            }
-            if let w = kimi.tertiaryWindow {
-                limitRow(label: Strings.kimiTotalLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kimi")
-            }
-            if let parallelLimit = kimi.parallelLimit {
-                Text(Strings.kimiParallelLabel(parallelLimit))
+            if let footnote {
+                Text(footnote)
                     .font(.system(.caption2, design: .default))
                     .foregroundStyle(.tertiary)
             }
         }
-    }
-
-    // MARK: - Kiro
-
-    private func kiroContent(_ kiro: KiroLimits) -> some View {
-        VStack(spacing: 4) {
-            if let w = kiro.primaryWindow {
-                limitRow(label: Strings.kiroMonthLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
-            }
-            if let w = kiro.secondaryWindow {
-                limitRow(label: Strings.kiroBonusLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
-            }
+        .modifier(ProviderClickableStyle(isActive: explainingProvider == id))
+        .onTapGesture { explainingProvider = (explainingProvider == id) ? nil : id }
+        .popover(isPresented: isOpen, arrowEdge: .trailing) {
+            LimitsExplainContent(providerName: title, specs: specs)
         }
     }
 
-    // MARK: - Grok
+    // MARK: - Window specs (one source of truth for rows + the explain popover)
 
-    private func grokContent(_ grok: GrokLimits) -> some View {
-        VStack(spacing: 4) {
-            if let w = grok.primaryWindow {
-                limitRow(label: Strings.grokMonthLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Grok Build")
-            }
-            if let w = grok.secondaryWindow {
-                limitRow(label: Strings.grokOndemandLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Grok Build")
-            }
-        }
+    private func makeSpec(_ label: String, _ pct: Double, windowSeconds: Double? = nil, iso: String?) -> LimitWindowSpec {
+        let date = resetDate(iso: iso)
+        return LimitWindowSpec(label: label, pct: pct, windowSeconds: windowSeconds, resetDate: date, resetText: date.map(relativeString))
     }
 
-    // MARK: - Copilot
-
-    private func copilotContent(_ copilot: CopilotLimits) -> some View {
-        VStack(spacing: 4) {
-            if let w = copilot.primaryWindow {
-                limitRow(label: "Premium", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "GitHub Copilot")
-            }
-            if let w = copilot.secondaryWindow {
-                limitRow(label: "Chat", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "GitHub Copilot")
-            }
-        }
+    private func makeSpec(_ label: String, _ pct: Double, windowSeconds: Double? = nil, epoch: Int?) -> LimitWindowSpec {
+        let date = resetDate(epoch: epoch)
+        return LimitWindowSpec(label: label, pct: pct, windowSeconds: windowSeconds, resetDate: date, resetText: date.map(relativeString))
     }
 
-    // MARK: - Antigravity
+    private func claudeSpecs(_ c: ClaudeLimits) -> [LimitWindowSpec] {
+        var s: [LimitWindowSpec] = []
+        if let w = c.fiveHour { s.append(makeSpec("5h", w.utilization, windowSeconds: 5 * 3600, iso: w.resetsAt)) }
+        if let w = c.sevenDay { s.append(makeSpec("7d", w.utilization, windowSeconds: 7 * 86400, iso: w.resetsAt)) }
+        if let w = c.sevenDayOpus { s.append(makeSpec("Opus", w.utilization, windowSeconds: 7 * 86400, iso: w.resetsAt)) }
+        return s
+    }
 
-    private func antigravityContent(_ antigravity: AntigravityLimits) -> some View {
-        VStack(spacing: 4) {
-            if let w = antigravity.primaryWindow {
-                limitRow(label: "Claude", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Antigravity")
-            }
-            if let w = antigravity.secondaryWindow {
-                limitRow(label: "G Pro", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Antigravity")
-            }
-            if let w = antigravity.tertiaryWindow {
-                limitRow(label: "Flash", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Antigravity")
-            }
-        }
+    private func codexSpecs(_ c: CodexLimits) -> [LimitWindowSpec] {
+        var s: [LimitWindowSpec] = []
+        if let w = c.primaryWindow { s.append(makeSpec("5h", Double(w.usedPercent), windowSeconds: w.limitWindowSeconds.map(Double.init), epoch: w.resetAt)) }
+        if let w = c.secondaryWindow { s.append(makeSpec("7d", Double(w.usedPercent), windowSeconds: w.limitWindowSeconds.map(Double.init), epoch: w.resetAt)) }
+        if let w = c.sparkPrimaryWindow { s.append(makeSpec("Spark 5h", Double(w.usedPercent), windowSeconds: w.limitWindowSeconds.map(Double.init), epoch: w.resetAt)) }
+        if let w = c.sparkSecondaryWindow { s.append(makeSpec("Spark 7d", Double(w.usedPercent), windowSeconds: w.limitWindowSeconds.map(Double.init), epoch: w.resetAt)) }
+        return s
+    }
+
+    private func cursorSpecs(_ c: CursorLimits) -> [LimitWindowSpec] {
+        var s: [LimitWindowSpec] = []
+        if let w = c.primaryWindow { s.append(makeSpec(Strings.cursorPlanLabel, w.usedPercent, iso: w.resetAt)) }
+        if let w = c.secondaryWindow { s.append(makeSpec(Strings.cursorAutoLabel, w.usedPercent, iso: w.resetAt)) }
+        if let w = c.tertiaryWindow { s.append(makeSpec("API", w.usedPercent, iso: w.resetAt)) }
+        return s
+    }
+
+    private func geminiSpecs(_ g: GeminiLimits) -> [LimitWindowSpec] {
+        var s: [LimitWindowSpec] = []
+        if let w = g.primaryWindow { s.append(makeSpec("Pro", w.usedPercent, iso: w.resetAt)) }
+        if let w = g.secondaryWindow { s.append(makeSpec("Flash", w.usedPercent, iso: w.resetAt)) }
+        if let w = g.tertiaryWindow { s.append(makeSpec("Lite", w.usedPercent, iso: w.resetAt)) }
+        return s
+    }
+
+    private func kimiSpecs(_ k: KimiLimits) -> [LimitWindowSpec] {
+        var s: [LimitWindowSpec] = []
+        if let w = k.primaryWindow { s.append(makeSpec(Strings.kimiWeeklyLabel, w.usedPercent, windowSeconds: 7 * 86400, iso: w.resetAt)) }
+        if let w = k.secondaryWindow { s.append(makeSpec(Strings.kimiFiveHourLabel, w.usedPercent, windowSeconds: 5 * 3600, iso: w.resetAt)) }
+        if let w = k.tertiaryWindow { s.append(makeSpec(Strings.kimiTotalLabel, w.usedPercent, iso: w.resetAt)) }
+        return s
+    }
+
+    private func kiroSpecs(_ k: KiroLimits) -> [LimitWindowSpec] {
+        var s: [LimitWindowSpec] = []
+        if let w = k.primaryWindow { s.append(makeSpec(Strings.kiroMonthLabel, w.usedPercent, iso: w.resetAt)) }
+        if let w = k.secondaryWindow { s.append(makeSpec(Strings.kiroBonusLabel, w.usedPercent, iso: w.resetAt)) }
+        return s
+    }
+
+    private func grokSpecs(_ g: GrokLimits) -> [LimitWindowSpec] {
+        var s: [LimitWindowSpec] = []
+        if let w = g.primaryWindow { s.append(makeSpec(Strings.grokMonthLabel, w.usedPercent, iso: w.resetAt)) }
+        if let w = g.secondaryWindow { s.append(makeSpec(Strings.grokOndemandLabel, w.usedPercent, iso: w.resetAt)) }
+        return s
+    }
+
+    private func copilotSpecs(_ c: CopilotLimits) -> [LimitWindowSpec] {
+        var s: [LimitWindowSpec] = []
+        if let w = c.primaryWindow { s.append(makeSpec("Premium", w.usedPercent, iso: w.resetAt)) }
+        if let w = c.secondaryWindow { s.append(makeSpec("Chat", w.usedPercent, iso: w.resetAt)) }
+        return s
+    }
+
+    private func antigravitySpecs(_ a: AntigravityLimits) -> [LimitWindowSpec] {
+        var s: [LimitWindowSpec] = []
+        if let w = a.primaryWindow { s.append(makeSpec("Claude", w.usedPercent, iso: w.resetAt)) }
+        if let w = a.secondaryWindow { s.append(makeSpec("G Pro", w.usedPercent, iso: w.resetAt)) }
+        if let w = a.tertiaryWindow { s.append(makeSpec("Flash", w.usedPercent, iso: w.resetAt)) }
+        return s
     }
 
     // MARK: - Row
 
-    private func limitRow(label: String, pct: Double, reset: String?, toolName: String) -> some View {
+    private func limitRow(
+        label: String,
+        pct: Double,
+        reset: String?,
+        toolName: String,
+        windowSeconds: Double? = nil,
+        resetDate: Date? = nil
+    ) -> some View {
         let rawClamped = min(max(pct, 0), 100)
+        let usedFraction = rawClamped / 100.0
         let displayValue = settings.displayMode == .remaining ? (100 - rawClamped) : rawClamped
-        let fraction = displayValue / 100.0
-        // Bar color thresholds are mirrored in remaining mode: low remaining is bad.
-        let colorFraction = settings.displayMode == .remaining ? (1 - fraction) : fraction
+
+        // Unified threshold fill (green → amber → red), based on actual usage so
+        // the color reads the same in used and remaining modes.
+        let fillColor = Color.limitBar(fraction: usedFraction)
+
+        // Time-aware pace mark (CodexBar-style notch). Shown once the window has
+        // meaningful usage (≥5%) so a fresh window doesn't float a mark in empty
+        // track. Green when on/under pace, red when ahead (deficit). Requires a
+        // trusted window length; monthly / billing-cycle windows show no mark.
+        var pacePercent: Double?
+        var paceOver = false
+        if let windowSeconds, windowSeconds > 0, let resetDate {
+            let pace = LimitPace.compute(
+                usedFraction: usedFraction,
+                windowSeconds: windowSeconds,
+                secondsUntilReset: max(0, resetDate.timeIntervalSinceNow),
+                remainingMode: settings.displayMode == .remaining
+            )
+            pacePercent = pace.pacePercent
+            paceOver = pace.paceOver
+        }
+
         let accessibilityLabel = Strings.limitAccessibility(
             toolName: toolName,
             label: label,
@@ -285,18 +276,12 @@ struct UsageLimitsView: View {
                 })
                 .frame(width: labelColumnWidth > 0 ? labelColumnWidth : nil, alignment: .leading)
 
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.limitTrack)
-                    if fraction > 0 {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.limitBar(fraction: colorFraction))
-                            .frame(width: max(3, geo.size.width * min(fraction, 1.0)))
-                    }
-                }
-            }
-            .frame(height: 5)
+            UsageLimitBar(
+                percent: displayValue,
+                fillColor: fillColor,
+                pacePercent: pacePercent,
+                paceOver: paceOver
+            )
 
             Text(displayPercentLabel(displayValue))
                 .font(.system(.caption, design: .monospaced))
@@ -327,19 +312,26 @@ struct UsageLimitsView: View {
     // MARK: - Helpers
 
     private func relativeReset(iso: String?) -> String? {
-        guard let iso else { return nil }
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = fmt.date(from: iso) ?? {
-            fmt.formatOptions = [.withInternetDateTime]
-            return fmt.date(from: iso)
-        }() else { return nil }
-        return relativeString(from: date)
+        resetDate(iso: iso).map(relativeString)
     }
 
     private func relativeReset(epoch: Int?) -> String? {
+        resetDate(epoch: epoch).map(relativeString)
+    }
+
+    /// Parsed reset instant — feeds both the relative label and the pace marker.
+    private func resetDate(iso: String?) -> Date? {
+        guard let iso else { return nil }
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fmt.date(from: iso) { return date }
+        fmt.formatOptions = [.withInternetDateTime]
+        return fmt.date(from: iso)
+    }
+
+    private func resetDate(epoch: Int?) -> Date? {
         guard let epoch else { return nil }
-        return relativeString(from: Date(timeIntervalSince1970: TimeInterval(epoch)))
+        return Date(timeIntervalSince1970: TimeInterval(epoch))
     }
 
     private func relativeString(from date: Date) -> String {
@@ -511,5 +503,90 @@ private struct LimitLabelWidthKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+/// Makes a provider block read as clickable: a rounded hover/active highlight and
+/// a pointing-hand cursor. `isActive` keeps the highlight while its popover is open.
+private struct ProviderClickableStyle: ViewModifier {
+    let isActive: Bool
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 6)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.primary.opacity(isActive ? 0.08 : (hovering ? 0.05 : 0)))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .onHover { hovering in
+                self.hovering = hovering
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+    }
+}
+
+/// One usage window's data — the single source of truth for both the rendered
+/// row and the explanation popover, so the two never drift.
+private struct LimitWindowSpec: Identifiable {
+    var id: String { label }
+    let label: String
+    let pct: Double
+    let windowSeconds: Double?
+    let resetDate: Date?
+    let resetText: String?
+}
+
+/// Side popover with this provider's live per-window numbers (used %, even-pace %,
+/// ahead/on-track, reset) plus a short note on how to read the bars.
+private struct LimitsExplainContent: View {
+    let providerName: String
+    let specs: [LimitWindowSpec]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(providerName)
+                .font(.system(.subheadline, design: .default).weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(specs) { spec in
+                    Text(Self.line(for: spec))
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Divider().opacity(0.5)
+
+            Text(Strings.limitsExplainBody)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(width: 256)
+    }
+
+    /// Live pace numbers + current-rate projection for one window, via the shared
+    /// `LimitPace.compute` (same source of truth the bar uses).
+    private static func line(for spec: LimitWindowSpec) -> String {
+        let usedFraction = min(max(spec.pct, 0), 100) / 100.0
+        let used = Int((usedFraction * 100).rounded())
+        var pace = LimitPace.Result()
+        if let windowSeconds = spec.windowSeconds, windowSeconds > 0, let resetDate = spec.resetDate {
+            pace = LimitPace.compute(
+                usedFraction: usedFraction,
+                windowSeconds: windowSeconds,
+                secondsUntilReset: max(0, resetDate.timeIntervalSinceNow),
+                remainingMode: false
+            )
+        }
+        return Strings.limitWindowExplainLine(
+            label: spec.label, used: used, expected: pace.expectedPercent, over: pace.paceOver,
+            runsOutEta: pace.runsOutEta, projectedEnd: pace.projectedEnd
+        )
     }
 }

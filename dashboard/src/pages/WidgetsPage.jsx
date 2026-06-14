@@ -436,6 +436,7 @@ function MenuBarDisplayCard() {
   });
 
   const animatedIcon = settings?.animatedIcon !== false;
+  const confettiOnReset = settings?.confettiOnReset !== false;
 
   return (
     <article className="rounded-xl border border-oai-gray-200 bg-white p-5 transition-colors duration-200 dark:border-oai-gray-800 dark:bg-oai-gray-900 sm:p-6">
@@ -468,6 +469,13 @@ function MenuBarDisplayCard() {
           checked={animatedIcon}
           disabled={!available}
           onChange={() => setSetting("animatedIcon", !animatedIcon)}
+        />
+        <MenuBarToggleRow
+          label={copy("settings.menubar.confettiOnReset")}
+          hint={copy("settings.menubar.confettiOnResetHint")}
+          checked={confettiOnReset}
+          disabled={!available}
+          onChange={() => setSetting("confettiOnReset", !confettiOnReset)}
         />
       </div>
     </article>

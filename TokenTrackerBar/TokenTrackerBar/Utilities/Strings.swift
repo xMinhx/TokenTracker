@@ -90,6 +90,14 @@ enum Strings {
     static var syncingUsageData: String { t("Syncing usage data…", "正在同步使用数据…", "正在同步使用資料…", "使用データを同期中…", "사용 데이터 동기화 중…") }
     static var syncingFirstLaunchHint: String { t("First launch may take a moment", "首次启动可能需要一点时间", "首次啟動可能需要一點時間", "初回起動は少し時間がかかる場合があります", "첫 실행은 잠시 시간이 걸릴 수 있습니다") }
     static var limitsDisplayTitle: String { t("Limit Display", "限额显示", "限額顯示", "上限の表示", "한도 표시") }
+    static var confettiOnResetLabel: String { t("Confetti on reset", "额度重置时撒花", "額度重置時撒花", "リセット時に紙吹雪", "한도 초기화 시 색종이") }
+    /// Toast shown with the celebration firework. `provider` is a display name (e.g. "Claude"); nil = generic.
+    static func limitResetCelebration(provider: String?) -> String {
+        guard let provider else {
+            return t("Limit reset 🎉", "额度已重置 🎉", "額度已重置 🎉", "上限がリセット 🎉", "한도 초기화 🎉")
+        }
+        return t("\(provider) limit reset 🎉", "\(provider) 额度已重置 🎉", "\(provider) 額度已重置 🎉", "\(provider) の上限がリセット 🎉", "\(provider) 한도 초기화 🎉")
+    }
     static var limitDisplayModeLabel: String { t("Usage", "用量", "用量", "使用量", "사용량") }
     static var limitDisplayModeUsed: String { t("Used", "已用", "已用", "使用済み", "사용됨") }
     static var limitDisplayModeRemaining: String { t("Remaining", "剩余", "剩餘", "残り", "남음") }
@@ -295,6 +303,47 @@ enum Strings {
         let base = t("\(toolName) \(label) limit, \(percent)% \(modeSuffix)", "\(toolName) \(label) 限额，\(percent)% \(modeSuffix)", "\(toolName) \(label) 限額，\(percent)% \(modeSuffix)", "\(toolName) \(label) 上限、\(percent)% \(modeSuffix)", "\(toolName) \(label) 한도, \(percent)% \(modeSuffix)")
         guard let reset else { return base }
         return t("\(base), resets in \(reset)", "\(base)，\(reset) 后重置", "\(base)，\(reset) 後重置", "\(base)、\(reset) 後にリセット", "\(base), \(reset) 후 초기화")
+    }
+
+    /// One window's line in the explain popover. Adds only what the bar doesn't
+    /// already show: pace status + a current-rate projection. Concise on purpose.
+    static func limitWindowExplainLine(label: String, used: Int, expected: Int?, over: Bool, runsOutEta: String?, projectedEnd: Int?) -> String {
+        guard expected != nil else {
+            return t("\(label): \(used)% used", "\(label)：已用 \(used)%", "\(label)：已用 \(used)%", "\(label)：\(used)% 使用", "\(label): \(used)% 사용")
+        }
+        if over {
+            if let eta = runsOutEta {
+                return t("\(label): ahead of pace, ~\(eta) to limit",
+                         "\(label)：偏快，约 \(eta) 后用完",
+                         "\(label)：偏快，約 \(eta) 後用完",
+                         "\(label)：速い、約 \(eta) で上限",
+                         "\(label): 빠름, 약 \(eta) 후 소진")
+            }
+            let pct = projectedEnd ?? 100
+            return t("\(label): ahead of pace, ~\(pct)% by reset",
+                     "\(label)：偏快，预计用到 \(pct)%",
+                     "\(label)：偏快，預計用到 \(pct)%",
+                     "\(label)：速い、リセットまでに約 \(pct)%",
+                     "\(label): 빠름, 초기화 전 약 \(pct)%")
+        }
+        let pct = projectedEnd ?? used
+        return t("\(label): on track, ~\(pct)% by reset",
+                 "\(label)：节奏正常，预计用到 \(pct)%",
+                 "\(label)：節奏正常，預計用到 \(pct)%",
+                 "\(label)：順調、リセットまでに約 \(pct)%",
+                 "\(label): 양호, 초기화 전 약 \(pct)%")
+    }
+
+    /// Explanation shown in the side popover when a provider block is clicked.
+    /// Teaches how to read the bars — especially the pace mark.
+    static var limitsExplainBody: String {
+        t(
+            "The mark is the even-pace point; fill past it means you're ahead.",
+            "竖标为匀速到现在应到的位置，填充超过即为偏快。",
+            "豎標為勻速到現在應到的位置，填充超過即為偏快。",
+            "目盛りは一定ペースの位置。塗りが超えると速いペースです。",
+            "표시선은 균일 페이스 위치이며, 채움이 넘으면 빠른 편입니다."
+        )
     }
 
     static func randomTokenIncrementMessage(delta: String) -> String {

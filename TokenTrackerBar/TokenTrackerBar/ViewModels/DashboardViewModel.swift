@@ -58,6 +58,7 @@ class DashboardViewModel: ObservableObject {
     @Published private(set) var topModels: [TopModel] = []
 
     private var refreshTask: Task<Void, Never>?
+    private let resetDetector = WeeklyLimitResetDetector()
 
     // MARK: - Computed Properties
 
@@ -213,6 +214,7 @@ class DashboardViewModel: ObservableObject {
                         current: self.usageLimits,
                         incoming: newLimits
                     )
+                    self.detectLimitResets(in: self.usageLimits)
                 } catch {
                     // Non-fatal: usage limits are best-effort, don't increment errorCount.
                     // Retain whatever `usageLimits` we had before (the "last record").
@@ -277,6 +279,24 @@ class DashboardViewModel: ObservableObject {
     func stopAutoRefresh() {
         refreshTask?.cancel()
         refreshTask = nil
+    }
+
+    // MARK: - Limit-reset celebration
+
+    /// Feed the latest limits into the reset detector. When a window rolls over
+    /// after the user had been meaningfully constrained, post `.weeklyLimitReset`
+    /// so the status bar can fire confetti (gated behind the user's toggle there).
+    private func detectLimitResets(in limits: UsageLimitsResponse?) {
+        guard let limits else { return }
+        let snapshot = WeeklyLimitResetDetector.loadSnapshot()
+        let (events, updated) = resetDetector.evaluate(
+            readings: limits.limitWindowReadings(),
+            snapshot: snapshot,
+            now: Date().timeIntervalSince1970
+        )
+        WeeklyLimitResetDetector.saveSnapshot(updated)
+        guard let first = events.first else { return }
+        NotificationCenter.default.post(name: .weeklyLimitReset, object: first)
     }
 
     // MARK: - Derived Data

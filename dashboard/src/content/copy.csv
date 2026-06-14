@@ -427,6 +427,8 @@ settings.menubar.showStats,ui,SettingsPage,SettingsPage,mb_show_stats,"Show stat
 settings.menubar.showStatsHint,ui,SettingsPage,SettingsPage,mb_show_stats_hint,"Display today's token count and cost beside the menu bar icon.",,active
 settings.menubar.animatedIcon,ui,SettingsPage,SettingsPage,mb_anim,"Animated icon",,active
 settings.menubar.animatedIconHint,ui,SettingsPage,SettingsPage,mb_anim_hint,"Blink the Clawd character and play the syncing animation in the menu bar.",,active
+settings.menubar.confettiOnReset,ui,SettingsPage,SettingsPage,mb_confetti,"Confetti on reset",,active
+settings.menubar.confettiOnResetHint,ui,SettingsPage,SettingsPage,mb_confetti_hint,"Set off a fireworks celebration when a usage limit resets after you were near it.",,active
 settings.menubar.launchAtLogin,ui,SettingsPage,SettingsPage,mb_login,"Launch at login",,active
 settings.menubar.launchAtLoginHint,ui,SettingsPage,SettingsPage,mb_login_hint,"Start TokenTrackerBar automatically when you sign in to macOS.",,active
 settings.menubar.syncNow,ui,SettingsPage,SettingsPage,mb_sync_now,"Sync now",,active
@@ -540,6 +542,11 @@ limits.label.kimi_weekly,ui,LimitsPage,UsageLimitsPanel,kimi_weekly,"Weekly",,ac
 limits.label.kimi_5h,ui,LimitsPage,UsageLimitsPanel,kimi_5h,"5h",,active
 limits.label.kimi_total,ui,LimitsPage,UsageLimitsPanel,kimi_total,"Total",,active
 limits.label.kimi_parallel,ui,LimitsPage,UsageLimitsPanel,kimi_parallel,"Parallel: {{count}}",,active
+limits.explain.used,ui,LimitsPage,UsageLimitsPanel,explain_used,"{{label}}: {{used}}% used",,active
+limits.explain.on_track,ui,LimitsPage,UsageLimitsPanel,explain_on_track,"{{label}}: on track, ~{{pct}}% by reset",,active
+limits.explain.ahead_eta,ui,LimitsPage,UsageLimitsPanel,explain_ahead_eta,"{{label}}: ahead of pace, ~{{eta}} to limit",,active
+limits.explain.ahead_pct,ui,LimitsPage,UsageLimitsPanel,explain_ahead_pct,"{{label}}: ahead of pace, ~{{pct}}% by reset",,active
+limits.explain.body,ui,LimitsPage,UsageLimitsPanel,explain_body,"The mark is the even-pace point; fill past it means you're ahead.",,active
 limits.label.copilot_premium,ui,LimitsPage,UsageLimitsPanel,copilot_premium,"Premium",,active
 limits.label.copilot_chat,ui,LimitsPage,UsageLimitsPanel,copilot_chat,"Chat",,active
 limits.label.grok_month,ui,LimitsPage,UsageLimitsPanel,grok_month,"Month",,active

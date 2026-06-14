@@ -6,19 +6,19 @@ export const PROVIDER_LIMIT_SPECS = {
   claude: {
     windows(data) {
       return [
-        { key: "5h", labelKey: "limits.label.claude_5h", window: data.five_hour, pctField: "utilization", resetField: "resets_at" },
-        { key: "7d", labelKey: "limits.label.claude_7d", window: data.seven_day, pctField: "utilization", resetField: "resets_at" },
-        { key: "opus", labelKey: "limits.label.claude_opus", window: data.seven_day_opus, pctField: "utilization", resetField: "resets_at" },
+        { key: "5h", labelKey: "limits.label.claude_5h", window: data.five_hour, pctField: "utilization", resetField: "resets_at", windowSeconds: 5 * 3600 },
+        { key: "7d", labelKey: "limits.label.claude_7d", window: data.seven_day, pctField: "utilization", resetField: "resets_at", windowSeconds: 7 * 86400 },
+        { key: "opus", labelKey: "limits.label.claude_opus", window: data.seven_day_opus, pctField: "utilization", resetField: "resets_at", windowSeconds: 7 * 86400 },
       ];
     },
   },
   codex: {
     windows(data) {
       return [
-        { key: "5h", labelKey: "limits.label.codex_5h", window: data.primary_window },
-        { key: "7d", labelKey: "limits.label.codex_7d", window: data.secondary_window },
-        { key: "spark-5h", labelKey: "limits.label.codex_spark_5h", window: data.spark_primary_window },
-        { key: "spark-7d", labelKey: "limits.label.codex_spark_7d", window: data.spark_secondary_window },
+        { key: "5h", labelKey: "limits.label.codex_5h", window: data.primary_window, windowSecondsField: "limit_window_seconds" },
+        { key: "7d", labelKey: "limits.label.codex_7d", window: data.secondary_window, windowSecondsField: "limit_window_seconds" },
+        { key: "spark-5h", labelKey: "limits.label.codex_spark_5h", window: data.spark_primary_window, windowSecondsField: "limit_window_seconds" },
+        { key: "spark-7d", labelKey: "limits.label.codex_spark_7d", window: data.spark_secondary_window, windowSecondsField: "limit_window_seconds" },
       ];
     },
   },
@@ -44,8 +44,8 @@ export const PROVIDER_LIMIT_SPECS = {
     extra: "kimi_parallel",
     windows(data) {
       return [
-        { key: "weekly", labelKey: "limits.label.kimi_weekly", window: data.primary_window },
-        { key: "5h", labelKey: "limits.label.kimi_5h", window: data.secondary_window },
+        { key: "weekly", labelKey: "limits.label.kimi_weekly", window: data.primary_window, windowSeconds: 7 * 86400 },
+        { key: "5h", labelKey: "limits.label.kimi_5h", window: data.secondary_window, windowSeconds: 5 * 3600 },
         { key: "total", labelKey: "limits.label.kimi_total", window: data.tertiary_window },
       ];
     },

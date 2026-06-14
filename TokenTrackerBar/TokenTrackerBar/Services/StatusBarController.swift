@@ -31,6 +31,7 @@ final class StatusBarController: NSObject {
     private let launchAtLoginManager: LaunchAtLoginManager
     private let desktopPetController: DesktopPetWindowController
     private var animator: MenuBarAnimator?
+    private let confettiController = ScreenConfettiOverlayController()
     private var cancellables = Set<AnyCancellable>()
     /// While the status-item menu is open, refreshes the “Check for Updates” row when download/check status changes.
     private var updateMenuStatusObserver: NSObjectProtocol?
@@ -70,6 +71,28 @@ final class StatusBarController: NSObject {
         observeSyncState()
         observeNativeBridgeSettings()
         observeApplicationActivity()
+        observeWeeklyLimitReset()
+    }
+
+    // MARK: - Limit-reset celebration
+
+    /// Listen for the ViewModel's reset detection and fire the firework — but
+    /// only when the user has opted in.
+    private func observeWeeklyLimitReset() {
+        NotificationCenter.default.addObserver(
+            forName: .weeklyLimitReset,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let event = note.object as? LimitResetEvent
+            MainActor.assumeIsolated { self?.celebrateLimitReset(event: event) }
+        }
+    }
+
+    private func celebrateLimitReset(event: LimitResetEvent?) {
+        guard WeeklyLimitResetDetector.confettiEnabled() else { return }
+        let name = event.map { LimitsSettingsStore.displayNames[$0.provider] ?? $0.provider.capitalized }
+        confettiController.play(message: Strings.limitResetCelebration(provider: name))
     }
 
     private func closePopoverForModalAlert() {
