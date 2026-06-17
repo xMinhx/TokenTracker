@@ -102,6 +102,13 @@ async function parseRolloutIncremental({
     cursors.files = {};
   }
 
+  // Persisted set of seen Codex event keys (sessionUUID:eventTimestamp). Mirrors
+  // the claudeHashes pattern: it makes an inode-changing re-scan idempotent so an
+  // external rewrite of a session file (Codex-Manager's atomic provider-patch on
+  // account switch, issue #187) cannot re-count already-counted events.
+  const prevCodexHashes = Array.isArray(cursors?.codexHashes) ? cursors.codexHashes : [];
+  const seenCodexEvents = new Set(prevCodexHashes);
+
   for (let idx = 0; idx < rolloutFiles.length; idx++) {
     const entry = rolloutFiles[idx];
     const filePath = typeof entry === "string" ? entry : entry?.path;
@@ -147,6 +154,8 @@ async function parseRolloutIncremental({
       projectMetaCache,
       publicRepoCache,
       publicRepoResolver,
+      seenCodexEvents,
+      sessionId: codexSessionIdFromPath(filePath),
     });
 
     cursors.files[key] = {
@@ -176,6 +185,7 @@ async function parseRolloutIncremental({
   const projectBucketsQueued = projectEnabled
     ? await enqueueTouchedProjectBuckets({ projectQueuePath, projectState, projectTouchedBuckets })
     : 0;
+  cursors.codexHashes = Array.from(seenCodexEvents);
   hourlyState.updatedAt = new Date().toISOString();
   cursors.hourly = hourlyState;
   if (projectState) {
@@ -718,6 +728,22 @@ async function parseOpenclawSessionFile({
   return { endOffset, eventsAggregated };
 }
 
+/**
+ * Extract the session UUID from a Codex rollout file path
+ * (`rollout-<datetime>-<uuid>.jsonl`). Used as the stable per-session scope for
+ * event dedup: it survives both an inode-changing rewrite (Codex-Manager
+ * atomically rewrites session files to patch the provider on account switch,
+ * issue #187) and a sessions/ -> archived_sessions/ move. Returns null when the
+ * name has no UUID, in which case the caller falls back to the full path.
+ */
+function codexSessionIdFromPath(filePath) {
+  if (typeof filePath !== "string") return null;
+  const m = filePath.match(
+    /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/,
+  );
+  return m ? m[1] : null;
+}
+
 async function parseRolloutFile({
   filePath,
   startOffset,
@@ -733,6 +759,8 @@ async function parseRolloutFile({
   projectMetaCache,
   publicRepoCache,
   publicRepoResolver,
+  seenCodexEvents,
+  sessionId,
 }) {
   const st = await fs.stat(filePath);
   const endOffset = st.size;
@@ -829,6 +857,28 @@ async function parseRolloutFile({
 
     const bucketStart = toUtcHalfHourStart(tokenTimestamp);
     if (!bucketStart) continue;
+
+    // Idempotent re-scan dedup (issue #187). Codex usage is parsed incrementally
+    // by (inode, offset): when the inode changes the file is re-scanned from
+    // offset 0 and every event's delta is re-added to the PERSISTENT hourly
+    // buckets. External tools rewrite session files without changing the token
+    // data — Codex-Manager atomically rewrites them (new inode) to patch the
+    // provider on every account/channel switch — so without dedup each switch
+    // double-counts the rewritten sessions. `totals` is already advanced above,
+    // so skipping an already-seen event keeps the cumulative-delta chain intact
+    // while preventing the re-add; genuinely new turns carry new timestamps and
+    // are still counted. Key = sessionUUID:eventTimestamp (both stable across the
+    // rewrite and across a sessions/ -> archived_sessions/ move).
+    //
+    // Scoped to the `codex` source: Codex-Manager (the tool that does the atomic
+    // rewrite) manages Codex. Other rollout-format sources (e.g. every-code) have
+    // their own model re-alignment that legitimately re-reads prior events, which
+    // this dedup would otherwise suppress.
+    if (seenCodexEvents && source === "codex") {
+      const dedupKey = `${sessionId || filePath}:${tokenTimestamp}`;
+      if (seenCodexEvents.has(dedupKey)) continue;
+      seenCodexEvents.add(dedupKey);
+    }
 
     const bucket = getHourlyBucket(hourlyState, source, model, bucketStart);
     addTotals(bucket.totals, delta);

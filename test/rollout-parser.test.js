@@ -102,6 +102,52 @@ test("parseRolloutIncremental ignores repeated token_count records with unchange
   }
 });
 
+test("parseRolloutIncremental does not re-count a session file rewritten with a new inode (issue #187)", async () => {
+  // Codex-Manager atomically rewrites session rollout files (new inode, same
+  // token data) when switching account/channel. The parser keys incremental
+  // reads on inode, so a new inode forces a full from-zero re-scan. Without
+  // event-level dedup that re-adds the whole file to the persistent hourly
+  // buckets on every switch (issue #187). Event dedup keyed on
+  // sessionUUID:eventTimestamp must make the re-scan idempotent.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const rolloutPath = path.join(
+      tmp,
+      "rollout-2025-12-17T00-00-00-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+    );
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const usage1 = { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, reasoning_output_tokens: 0, total_tokens: 15 };
+    const usage2 = { input_tokens: 15, cached_input_tokens: 0, output_tokens: 7, reasoning_output_tokens: 0, total_tokens: 22 };
+    const totals2 = { input_tokens: 25, cached_input_tokens: 0, output_tokens: 12, reasoning_output_tokens: 0, total_tokens: 37 };
+    const lines = [
+      buildTokenCountLine({ ts: "2025-12-17T00:00:00.000Z", last: usage1, total: usage1 }),
+      buildTokenCountLine({ ts: "2025-12-17T00:00:01.000Z", last: usage2, total: totals2 }),
+    ];
+    await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
+
+    const sumCodex = () =>
+      Object.entries(cursors.hourly?.buckets || {})
+        .filter(([k]) => k.startsWith("codex|"))
+        .reduce((s, [, v]) => s + Number(v.totals?.total_tokens || 0), 0);
+
+    await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath, source: "codex" });
+    const afterFirst = sumCodex();
+    assert.equal(afterFirst, totals2.total_tokens);
+    assert.equal(cursors.codexHashes.length, 2);
+
+    // Simulate Codex-Manager's atomic rewrite: identical content & path, NEW inode.
+    cursors.files[rolloutPath].inode = (cursors.files[rolloutPath].inode || 0) + 1_000_000;
+    await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath, source: "codex" });
+
+    assert.equal(sumCodex(), afterFirst, "re-scan after inode change must not double-count");
+    assert.equal(cursors.codexHashes.length, 2, "no new event keys on a pure re-scan");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseRolloutIncremental prefers cumulative total_token_usage delta over larger last_token_usage", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
   try {

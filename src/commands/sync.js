@@ -131,6 +131,17 @@ const CLAUDE_GROUND_TRUTH_REPAIR_KEY = "claudeGroundTruthRepair_2026_05_v4";
 // (token columns replay to the same final values: last emission per key wins,
 // exactly how the cloud rows were built the first time).
 const CLOUD_CONVERSATIONS_BACKFILL_KEY = "cloudConversationsBackfill_2026_06";
+// One-time repair (#187): until the codexHashes event-dedup landed, a Codex
+// session file rewritten with a new inode (Codex-Manager atomically rewrites
+// sessions/ files to patch the provider on every account switch) was re-scanned
+// from offset 0 and its tokens re-added to the persistent hourly buckets. This
+// rebuilds the codex buckets from disk (event-deduped), atomically drops the
+// inflated codex rows from queue.jsonl, and resets the upload offset so the
+// corrected values overwrite the cloud. GUARDED: skips if any codex session
+// file that previously contributed is no longer on disk (deleted, or moved to
+// ~/.codex/archived_sessions/ which sync does not scan) — clearing its bucket
+// would lose that history (ref the v6 ground-truth-repair data-loss incident).
+const CODEX_RESCAN_DEDUP_REPAIR_KEY = "codexRescanDedupRepair_2026_06";
 
 function warnProviderParseFailure(label, err, opts) {
   if (opts?.auto) return;
@@ -213,6 +224,7 @@ async function cmdSync(argv) {
     }
 
     await migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles });
+    await repairCodexRescanInflation({ cursors, queuePath, queueStatePath, rolloutFiles });
 
     const openclawFiles = openclawSignal?.sessionFile
       ? [{ path: openclawSignal.sessionFile, source: "openclaw" }]
@@ -1217,11 +1229,13 @@ module.exports = {
   cmdSync,
   migrateCursorUnknownBuckets,
   migrateRolloutCumulativeDeltaBuckets,
+  repairCodexRescanInflation,
   reincludeClaudeMemObserverFiles,
   repairGrokQueueFromSessionSnapshots,
   applyCloudConversationsBackfill,
   CURSOR_UNKNOWN_MIGRATION_KEY,
   ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY,
+  CODEX_RESCAN_DEDUP_REPAIR_KEY,
   CLAUDE_MEM_OBSERVER_REINCLUDE_KEY,
   GROK_APPEND_ONLY_REPAIR_MIGRATION_KEY,
   CLOUD_CONVERSATIONS_BACKFILL_KEY,
@@ -2069,6 +2083,190 @@ async function migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rollou
   }
 
   cursors.migrations[ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY] = new Date().toISOString();
+}
+
+// One-time repair (#187): rebuild codex hourly buckets that the inode-keyed
+// re-scan double-counted before the codexHashes event-dedup landed, and push
+// the corrected values to the cloud. Runs BEFORE the codex parse in the same
+// sync: it clears codex hourly state + codexHashes so the parse rebuilds clean,
+// atomically strips the inflated codex rows from queue.jsonl, and resets the
+// upload offset so the re-uploaded clean rows overwrite the cloud (with no
+// stale-high codex rows left in the queue, the ingest's within-batch MAX keeps
+// nothing larger, so its overwrite-upsert replaces the inflated cloud rows).
+//
+// GUARDED against the v6 ground-truth-repair data-loss incident: a clear+reparse
+// rebuilds codex buckets ONLY from sessions/ files the sync re-parses, so if any
+// codex file that previously contributed is gone from disk (deleted, or moved by
+// Codex-Manager to ~/.codex/archived_sessions/, which sync does not scan) the
+// migration is skipped entirely — the forward dedup fix still prevents new
+// double-counting; only this historical correction is deferred.
+async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, rolloutFiles }) {
+  if (!cursors || typeof cursors !== "object") return false;
+  const migrations = (cursors.migrations ||= {});
+  if (migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY]) return false;
+
+  // Codex session files THIS sync discovered (source === "codex").
+  const codexFiles = [];
+  for (const entry of Array.isArray(rolloutFiles) ? rolloutFiles : []) {
+    const fp = typeof entry === "string" ? entry : entry?.path;
+    const src = typeof entry === "string" ? "codex" : String(entry?.source || "codex");
+    if (fp && src === "codex") codexFiles.push(fp);
+  }
+  const codexFileSet = new Set(codexFiles);
+
+  // GUARD (data-loss prevention, ref the v6 ground-truth-repair incident): the
+  // rebuild can only reproduce buckets from the files this sync re-parses
+  // (codexFiles). If any codex session file that previously contributed (has a
+  // cursor) is gone from disk OR not in this sync's scan — deleted, or moved by
+  // Codex-Manager to ~/.codex/archived_sessions/ which listRolloutFiles does not
+  // scan — skip entirely. The forward dedup fix still stops NEW double-counting;
+  // only this historical correction defers.
+  if (cursors.files && typeof cursors.files === "object") {
+    for (const fp of Object.keys(cursors.files)) {
+      if (!/\/\.codex\/sessions\//.test(fp)) continue;
+      if (!fssync.existsSync(fp) || !codexFileSet.has(fp)) {
+        migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY] = {
+          skipped: true,
+          reason: "codex_session_file_missing_or_unscanned",
+          at: new Date().toISOString(),
+        };
+        return false;
+      }
+    }
+  }
+
+  // ATOMIC REBUILD into a THROWAWAY cursors + queue: never touch the live
+  // buckets/queue until the rebuild has fully succeeded. If anything throws we
+  // return WITHOUT mutating any persistent state and the migration retries next
+  // sync (the key is not set). This is the crucial difference from a
+  // "clear-then-rely-on-the-later-parse" design: the later parse's failure is
+  // swallowed (warnProviderParseFailure) and cursors are saved regardless, which
+  // would permanently zero a user's codex history.
+  let rebuilt;
+  const tmpQueue = `${queuePath}.codexrebuild.${process.pid}.${Date.now()}`;
+  try {
+    const tmpCursors = {
+      version: 1,
+      files: {},
+      hourly: { buckets: {}, groupQueued: {} },
+      codexHashes: [],
+    };
+    await parseRolloutIncremental({
+      rolloutFiles: codexFiles.map((p) => ({ path: p, source: "codex" })),
+      cursors: tmpCursors,
+      queuePath: tmpQueue,
+    });
+    let tmpRaw = "";
+    try {
+      tmpRaw = await fs.readFile(tmpQueue, "utf8");
+    } catch (e) {
+      if (e?.code !== "ENOENT") throw e;
+    }
+    rebuilt = {
+      buckets: tmpCursors.hourly.buckets || {},
+      groupQueued: tmpCursors.hourly.groupQueued || {},
+      codexHashes: Array.isArray(tmpCursors.codexHashes) ? tmpCursors.codexHashes : [],
+      files: tmpCursors.files || {},
+      queueRows: tmpRaw.split("\n").filter((l) => l.trim()),
+    };
+  } catch (e) {
+    console.error(
+      "[sync] codex rescan repair: rebuild failed, leaving all data untouched:",
+      e?.message || e,
+    );
+    return false;
+  } finally {
+    await fs.rm(tmpQueue, { force: true }).catch(() => {});
+  }
+
+  // SANITY: codex files exist on disk but the rebuild produced no codex buckets
+  // → treat as a failed rebuild and skip (do NOT clear live data, do NOT set the
+  // key — retry next sync).
+  const rebuiltCodexKeys = Object.keys(rebuilt.buckets).filter((k) => k.startsWith("codex|"));
+  if (codexFiles.length > 0 && rebuiltCodexKeys.length === 0) {
+    console.error(
+      `[sync] codex rescan repair: rebuild produced 0 codex buckets from ${codexFiles.length} files — skipping to avoid data loss`,
+    );
+    return false;
+  }
+
+  // COMMIT (only after a verified rebuild). A crash partway just leaves the
+  // migration to re-run next sync — re-rebuild + re-strip + re-commit converges.
+  //
+  // 1. queue.jsonl: drop the inflated codex rows, append the clean rebuilt ones
+  //    (atomic tmp+rename). With no old-high codex rows left, the cloud ingest's
+  //    within-batch MAX keeps nothing larger and its overwrite-upsert replaces
+  //    the inflated cloud rows on the next upload.
+  if (typeof queuePath === "string" && queuePath) {
+    let raw = "";
+    try {
+      raw = await fs.readFile(queuePath, "utf8");
+    } catch (e) {
+      if (e?.code !== "ENOENT") throw e;
+    }
+    const kept = [];
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      let row;
+      try {
+        row = JSON.parse(line);
+      } catch (_e) {
+        kept.push(line);
+        continue;
+      }
+      if (row?.source === "codex") continue;
+      kept.push(line);
+    }
+    await ensureDir(path.dirname(queuePath));
+    const tmp = `${queuePath}.tmp.${process.pid}.${Date.now()}`;
+    await fs.writeFile(tmp, kept.concat(rebuilt.queueRows).join("\n") + "\n", "utf8");
+    await fs.rename(tmp, queuePath);
+  }
+
+  // 2. Swap the live codex hourly state for the rebuilt one, and install the
+  //    rebuilt per-file cursors (offset at EOF) so the later parse in THIS sync
+  //    does not re-read codex (which would re-inflate project buckets).
+  const hourly = (cursors.hourly ||= { buckets: {}, groupQueued: {} });
+  hourly.buckets ||= {};
+  hourly.groupQueued ||= {};
+  for (const k of Object.keys(hourly.buckets)) {
+    if (k.startsWith("codex|")) delete hourly.buckets[k];
+  }
+  for (const k of Object.keys(hourly.groupQueued)) {
+    if (k.startsWith("codex|")) delete hourly.groupQueued[k];
+  }
+  for (const [k, v] of Object.entries(rebuilt.buckets)) {
+    if (k.startsWith("codex|")) hourly.buckets[k] = v;
+  }
+  for (const [k, v] of Object.entries(rebuilt.groupQueued)) {
+    if (k.startsWith("codex|")) hourly.groupQueued[k] = v;
+  }
+  cursors.files ||= {};
+  for (const fp of Object.keys(cursors.files)) {
+    if (/\/\.codex\/sessions\//.test(fp)) delete cursors.files[fp];
+  }
+  for (const [fp, v] of Object.entries(rebuilt.files)) {
+    cursors.files[fp] = v;
+  }
+  cursors.codexHashes = rebuilt.codexHashes;
+
+  // 3. Reset the cloud upload offset so the corrected queue re-uploads. Other
+  //    sources re-upsert idempotently (last emission per key wins).
+  if (typeof queueStatePath === "string" && queueStatePath) {
+    let uploadState = {};
+    try {
+      uploadState = JSON.parse(await fs.readFile(queueStatePath, "utf8"));
+    } catch (_e) {
+      uploadState = {};
+    }
+    uploadState.offset = 0;
+    uploadState.updatedAt = new Date().toISOString();
+    uploadState.note = "reset_after_codex_rescan_dedup_2026_06";
+    await fs.writeFile(queueStatePath, JSON.stringify(uploadState));
+  }
+
+  migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY] = new Date().toISOString();
+  return true;
 }
 
 // One-time repair migration: rebuild source=claude rows in queue.jsonl from

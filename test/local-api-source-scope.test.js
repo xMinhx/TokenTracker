@@ -96,6 +96,74 @@ test("usage-summary defaults to all scope and includes account-level Cursor usag
   }
 });
 
+test("usage-summary and model breakdown keep latest Codex queue row per bucket", async () => {
+  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-codex-dedup-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    await writeQueue(queuePath, [
+      {
+        source: "codex",
+        model: "gpt-5-codex",
+        hour_start: "2026-05-09T10:00:00.000Z",
+        input_tokens: 100,
+        cached_input_tokens: 200,
+        cache_creation_input_tokens: 0,
+        output_tokens: 50,
+        reasoning_output_tokens: 0,
+        total_tokens: 350,
+        billable_total_tokens: 350,
+        conversation_count: 1,
+      },
+      {
+        source: "codex",
+        model: "gpt-5-codex",
+        hour_start: "2026-05-09T10:00:00.000Z",
+        input_tokens: 120,
+        cached_input_tokens: 230,
+        cache_creation_input_tokens: 0,
+        output_tokens: 60,
+        reasoning_output_tokens: 0,
+        total_tokens: 410,
+        billable_total_tokens: 410,
+        conversation_count: 2,
+      },
+      {
+        source: "codex",
+        model: "gpt-5-codex",
+        hour_start: "2026-05-09T10:30:00.000Z",
+        input_tokens: 10,
+        cached_input_tokens: 20,
+        cache_creation_input_tokens: 0,
+        output_tokens: 5,
+        reasoning_output_tokens: 0,
+        total_tokens: 35,
+        billable_total_tokens: 35,
+        conversation_count: 1,
+      },
+    ]);
+
+    const summary = await callEndpoint(
+      queuePath,
+      "/functions/tokentracker-usage-summary?from=2026-05-09&to=2026-05-09&tz=UTC",
+    );
+    assert.equal(summary.totals.total_tokens, 445);
+    assert.equal(summary.totals.cached_input_tokens, 250);
+    assert.equal(summary.totals.conversation_count, 3);
+
+    const breakdown = await callEndpoint(
+      queuePath,
+      "/functions/tokentracker-usage-model-breakdown?from=2026-05-09&to=2026-05-09&tz=UTC",
+    );
+    const codex = breakdown.sources.find((entry) => entry.source === "codex");
+    assert.ok(codex);
+    assert.equal(codex.totals.total_tokens, 445);
+    assert.equal(codex.totals.cached_input_tokens, 250);
+    assert.equal(codex.models[0].totals.total_tokens, 445);
+  } finally {
+    await fs.promises.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("usage-model-breakdown defaults to all scope and can explicitly exclude account sources", async () => {
   const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-breakdown-scope-"));
   try {
