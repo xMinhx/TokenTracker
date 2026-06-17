@@ -83,7 +83,7 @@ export function DateRangePopover({ from, to, onApply, onCancel }) {
           nav: "flex items-center justify-between absolute inset-x-0 top-0 px-2",
           button_previous: "inline-flex items-center justify-center w-7 h-7 rounded-md text-oai-gray-500 hover:text-oai-black dark:text-oai-gray-400 dark:hover:text-oai-white hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 transition-colors",
           button_next: "inline-flex items-center justify-center w-7 h-7 rounded-md text-oai-gray-500 hover:text-oai-black dark:text-oai-gray-400 dark:hover:text-oai-white hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 transition-colors",
-          chevron: "w-4 h-4",
+          chevron: "w-4 h-4 fill-current",
           month_grid: "border-collapse",
           weekdays: "flex",
           weekday: "w-9 text-center text-xs font-medium text-oai-gray-400 dark:text-oai-gray-500 py-1",
