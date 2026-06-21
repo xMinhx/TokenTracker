@@ -100,3 +100,17 @@ promo-video/
 
 # Local skill tooling lockfile (hyperframes — not part of the repo)
 skills-lock.json
+
+# InsForge & AI agent skills
+.insforge
+.agent
+.agents
+.augment
+.claude
+.cline
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf
