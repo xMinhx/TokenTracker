@@ -156,6 +156,8 @@ export default async function (req: Request): Promise<Response> {
   const rangeStart = startDate.toISOString();
   const rangeEnd = endDate.toISOString();
 
+  // Per-device RPC errors are already degraded to 0 inside sumDeviceTokens;
+  // this catch is a last-resort guard for unexpected (synchronous) failures.
   let withTotals: Array<DeviceRow & { total_tokens: number }>;
   try {
     withTotals = await Promise.all(
