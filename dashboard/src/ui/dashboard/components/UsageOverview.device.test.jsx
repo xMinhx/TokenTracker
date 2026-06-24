@@ -62,7 +62,7 @@ describe("UsageOverview device dropdown", () => {
       { wrapper: Wrapper },
     );
     const trigger = screen.getByLabelText("Filter by device");
-    expect(trigger).toBeTruthy();
+    expect(trigger).toBeInTheDocument();
     await userEvent.click(trigger);
     await userEvent.click(await screen.findByText("Mac mini"));
     expect(onDeviceChange).toHaveBeenCalledWith("d2");

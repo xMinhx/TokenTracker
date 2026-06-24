@@ -281,7 +281,7 @@ export function UsageOverview({
                 className="h-8 px-2.5 text-xs"
               />
             ) : null}
-{onOpenShare ? (
+            {onOpenShare ? (
               <button
                 type="button"
                 onClick={onOpenShare}
