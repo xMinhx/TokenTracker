@@ -322,5 +322,9 @@
   "dashboard.expired_gate.feature.restore.title": "원활한 데이터 복원",
   "dashboard.expired_gate.feature.restore.desc": "다시 로그인하면 터미널 훅을 재구성할 필요 없이 멀티 디바이스 실시간 대시보드가 자동으로 복원됩니다.",
   "dashboard.expired_gate.feature.cloud.title": "교차 장치 동기화",
-  "dashboard.expired_gate.feature.cloud.desc": "동기화된 대시보드를 통해 어디서나 토큰 로그를 간편하게 확인하고 지출을 관리할 수 있습니다."
+  "dashboard.expired_gate.feature.cloud.desc": "동기화된 대시보드를 통해 어디서나 토큰 로그를 간편하게 확인하고 지출을 관리할 수 있습니다.",
+  "dashboard.device_filter.all": "모든 기기",
+  "dashboard.device_filter.aria": "기기별 필터",
+  "dashboard.device_card.title": "기기별",
+  "dashboard.device_card.unnamed": "이름 없는 기기"
 }

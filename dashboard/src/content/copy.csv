@@ -976,3 +976,7 @@ skills.usage.months_ago,ui,SkillsPage,SkillDetailPanel,usage_months_ago,"{{month
 skills.usage.unknown,ui,SkillsPage,SkillDetailPanel,usage_unknown,"Unknown",,active
 skills.usage.unused,ui,SkillsPage,SkillDetailPanel,usage_unused,"Not invoked yet. Possible dead weight if you never use it.",,active
 skills.usage.disclaimer,ui,SkillsPage,SkillDetailPanel,usage_disclaimer,"Counts from Claude transcripts. Cost is the approximate spend of turns that invoked this skill.",,active
+dashboard.device_filter.all,dashboard,DashboardPage,UsageOverview,option_all,"All devices",,active
+dashboard.device_filter.aria,dashboard,DashboardPage,UsageOverview,select_aria,"Filter by device",,active
+dashboard.device_card.title,dashboard,DashboardPage,DeviceUsageCard,title,"By device",,active
+dashboard.device_card.unnamed,dashboard,DashboardPage,DeviceUsageCard,unnamed,"Unnamed device",,active

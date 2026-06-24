@@ -322,5 +322,9 @@
   "dashboard.expired_gate.feature.restore.title": "無縫數據恢復",
   "dashboard.expired_gate.feature.restore.desc": "重新登入後自動恢復多端實時看板刷新，無需重新綁定。",
   "dashboard.expired_gate.feature.cloud.title": "跨端雲端同步",
-  "dashboard.expired_gate.feature.cloud.desc": "多端隨時離線統計並同步至個人控制台，多地協同掌握開銷。"
+  "dashboard.expired_gate.feature.cloud.desc": "多端隨時離線統計並同步至個人控制台，多地協同掌握開銷。",
+  "dashboard.device_filter.all": "全部裝置",
+  "dashboard.device_filter.aria": "依裝置篩選",
+  "dashboard.device_card.title": "依裝置",
+  "dashboard.device_card.unnamed": "未命名裝置"
 }
