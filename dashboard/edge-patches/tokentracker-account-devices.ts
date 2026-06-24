@@ -137,7 +137,7 @@ export default async function (req: Request): Promise<Response> {
   try {
     const { data, error } = await client.database
       .from("tokentracker_devices")
-      .select(`id, "device_name", platform, created_at`)
+      .select("id, device_name, platform, created_at")
       .eq("user_id", userId)
       .is("revoked_at", null);
     if (error) throw new Error(error.message);
