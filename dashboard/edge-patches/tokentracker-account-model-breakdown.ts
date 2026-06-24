@@ -410,6 +410,16 @@ export default async function (req: Request): Promise<Response> {
     return json({ error: (e as Error).message }, 500);
   }
 
+  // Optional single-device scope. The dashboard device filter passes
+  // ?device_id=<uuid>; narrow the active set to just that device. The
+  // includes() check is a security boundary: activeDeviceIds is already
+  // filtered to this JWT-verified user, so an id outside it (another user's
+  // device, or a revoked one) is ignored and we fall back to all devices.
+  const requestedDeviceId = url.searchParams.get("device_id");
+  if (requestedDeviceId && activeDeviceIds.includes(requestedDeviceId)) {
+    activeDeviceIds = [requestedDeviceId];
+  }
+
   // Widen the UTC query window by ±1 day so a caller in a non-UTC zone (e.g.
   // Asia/Shanghai for Day=2026-05-18, which spans UTC 2026-05-17T16:00 to
   // 2026-05-18T16:00) still gets every hourly row that maps into a local day

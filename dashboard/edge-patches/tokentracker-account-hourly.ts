@@ -241,6 +241,16 @@ export default async function (req: Request): Promise<Response> {
     return json({ error: (e as Error).message }, 500);
   }
 
+  // Optional single-device scope. The dashboard device filter passes
+  // ?device_id=<uuid>; narrow the active set to just that device. The
+  // includes() check is a security boundary: activeDeviceIds is already
+  // filtered to this JWT-verified user, so an id outside it (another user's
+  // device, or a revoked one) is ignored and we fall back to all devices.
+  const requestedDeviceId = url.searchParams.get("device_id");
+  if (requestedDeviceId && activeDeviceIds.includes(requestedDeviceId)) {
+    activeDeviceIds = [requestedDeviceId];
+  }
+
   // Query a 3-day UTC window around `day` to cover all TZ offsets (±14h max)
   const dayDate = new Date(`${day}T00:00:00Z`);
   const start = new Date(dayDate);
