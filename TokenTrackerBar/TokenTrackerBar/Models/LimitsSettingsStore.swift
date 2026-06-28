@@ -59,7 +59,6 @@ final class LimitsSettingsStore: ObservableObject {
         "kiro": "KiroLogo",
         "copilot": "CopilotLogo",
         "antigravity": "AntigravityLogo",
-        "opencodeGo": "OpenCodeLogo",
     ]
 
     // MARK: - Published state
