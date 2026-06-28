@@ -70,9 +70,10 @@ export const PROVIDER_LIMIT_SPECS = {
   antigravity: {
     windows(data) {
       return [
-        { key: "claude", labelKey: "limits.label.antigravity_claude", window: data.primary_window },
-        { key: "gpro", labelKey: "limits.label.antigravity_gpro", window: data.secondary_window },
-        { key: "flash", labelKey: "limits.label.antigravity_flash", window: data.tertiary_window },
+        { key: "claude-weekly", labelKey: "limits.label.antigravity_claude_weekly", window: data.primary_window },
+        { key: "claude-5h", labelKey: "limits.label.antigravity_claude_5h", window: data.secondary_window },
+        { key: "gemini-weekly", labelKey: "limits.label.antigravity_gemini_weekly", window: data.tertiary_window },
+        { key: "gemini-5h", labelKey: "limits.label.antigravity_gemini_5h", window: data.quaternary_window },
       ];
     },
   },
@@ -132,9 +133,10 @@ export function usageLimitsLabelCopyAnchor() {
     copy("limits.label.kiro_bonus"),
     copy("limits.label.grok_month"),
     copy("limits.label.grok_ondemand"),
-    copy("limits.label.antigravity_claude"),
-    copy("limits.label.antigravity_gpro"),
-    copy("limits.label.antigravity_flash"),
+    copy("limits.label.antigravity_claude_weekly"),
+    copy("limits.label.antigravity_claude_5h"),
+    copy("limits.label.antigravity_gemini_weekly"),
+    copy("limits.label.antigravity_gemini_5h"),
     copy("limits.label.copilot_premium"),
     copy("limits.label.copilot_chat"),
     copy("limits.label.zcode_glm52"),

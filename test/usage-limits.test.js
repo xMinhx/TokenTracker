@@ -6,7 +6,9 @@ const path = require("node:path");
 
 const {
   extractGeminiOauthClientCredentials,
+  extractAgyOauthClientCredentials,
   getUsageLimits,
+  loadAgyCredentials,
   normalizePlanLabel,
   loadKimiCredentials,
   normalizeCursorUsageSummary,
@@ -103,6 +105,218 @@ describe("extractGeminiOauthClientCredentials", () => {
         clientSecret: "fallback-secret",
       });
     } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("loadAgyCredentials", () => {
+  it("reads the agy OAuth token file from ~/.gemini/antigravity-cli", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-agy-creds-"));
+    try {
+      const agyHome = path.join(tmp, ".gemini", "antigravity-cli");
+      fs.mkdirSync(agyHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(agyHome, "antigravity-oauth-token"),
+        JSON.stringify({
+          token: {
+            access_token: "ya29.agy-test-token",
+            refresh_token: "1//agy-refresh-token",
+            expiry: "2099-01-01T00:00:00Z",
+          },
+          auth_method: "consumer",
+        }),
+        "utf8",
+      );
+
+      const result = loadAgyCredentials({ home: tmp });
+      assert.notEqual(result, null);
+      assert.equal(result.token.access_token, "ya29.agy-test-token");
+      assert.equal(result.auth_method, "consumer");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null when the token file does not exist", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-agy-nofile-"));
+    try {
+      const result = loadAgyCredentials({ home: tmp });
+      assert.equal(result, null);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("extractAgyOauthClientCredentials", () => {
+  it("extracts client ID from agy binary using grep", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-agy-extract-"));
+    try {
+      const agyBin = path.join(tmp, "agy");
+      // Create a fake binary with the OAuth client ID as a string
+      fs.writeFileSync(
+        agyBin,
+        [
+          Buffer.alloc(64, 0).toString(),
+          "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
+          Buffer.alloc(32, 0).toString(),
+        ].join(""),
+        "binary",
+      );
+      fs.chmodSync(agyBin, 0o755);
+
+      const result = await extractAgyOauthClientCredentials({
+        commandRunner(command, args) {
+          if (command === "which") {
+            return { status: 0, stdout: `${agyBin}\n` };
+          }
+          if (command === "grep") {
+            // Simulate grep extracting the client ID
+            const content = fs.readFileSync(args[args.length - 1], "utf8");
+            const match = content.match(/[0-9]+-[a-zA-Z0-9]+\.apps\.googleusercontent\.com/);
+            return { status: match ? 0 : 1, stdout: match ? `${match[0]}\n` : "" };
+          }
+          return { status: 1, stdout: "" };
+        },
+      });
+
+      assert.notEqual(result, null);
+      assert.match(result.clientId, /1071006060591-tmhssin/);
+      assert.equal(result.clientSecret, ""); // agy binary doesn't expose secret
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null when agy binary is not found", async () => {
+    const result = await extractAgyOauthClientCredentials({
+      commandRunner() {
+        return { status: 1, stdout: "" };
+      },
+    });
+    assert.equal(result, null);
+  });
+});
+
+describe("getUsageLimits gemini no-creds", () => {
+  it("returns configured:false when no gemini credentials exist", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-gemini-none-"));
+    try {
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner() { return { status: 1, stdout: "" }; },
+        commandRunner() { return { status: 1, stdout: "" }; },
+        fetchImpl() { return new Promise(() => {}); },
+      });
+
+      assert.equal(result.gemini.configured, false);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("returns configured:false when gemini binary not installed even if settings.json exists", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-gemini-settings-"));
+    try {
+      const geminiHome = path.join(tmp, ".gemini");
+      fs.mkdirSync(geminiHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(geminiHome, "settings.json"),
+        JSON.stringify({ security: { auth: { selectedType: "oauth" } } }),
+        "utf8",
+      );
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner() { return { status: 1, stdout: "" }; },
+        commandRunner() { return { status: 1, stdout: "" }; },
+        fetchImpl() { return new Promise(() => {}); },
+      });
+
+      assert.equal(result.gemini.configured, false);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("getUsageLimits antigravity cache", () => {
+  it("shows message when no language server and no cache", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-antigravity-noprocess-"));
+    try {
+      const agyHome = path.join(tmp, ".gemini", "antigravity-cli");
+      fs.mkdirSync(agyHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(agyHome, "antigravity-oauth-token"),
+        JSON.stringify({
+          token: {
+            access_token: "ya29.agy-gemini-test",
+            refresh_token: "1//agy-refresh",
+            expiry: "2099-01-01T00:00:00Z",
+          },
+          auth_method: "consumer",
+        }),
+        "utf8",
+      );
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner() { return { status: 1, stdout: "" }; },
+        commandRunner() { return { status: 1, stdout: "" }; },
+        fetchImpl() { return new Promise(() => {}); },
+      });
+
+      assert.equal(result.antigravity.configured, true);
+      assert.ok(result.antigravity.error.includes("not running"), `expected "not running" message, got: ${result.antigravity.error}`);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("serves cached data when no language server is running", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-antigravity-cache-"));
+    try {
+      const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+      fs.mkdirSync(trackerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(trackerDir, "usage-limits-cache.json"),
+        JSON.stringify({
+          antigravity: {
+            primary_window: { used_percent: 42, reset_at: "2099-05-22T00:00:00.000Z" },
+            cached_at: "2026-06-25T00:00:00.000Z",
+          },
+        }),
+        "utf8",
+      );
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner() { return { status: 1, stdout: "" }; },
+        commandRunner() { return { status: 1, stdout: "" }; },
+        fetchImpl() { return new Promise(() => {}); },
+      });
+
+      assert.equal(result.antigravity.configured, true);
+      assert.equal(result.antigravity.cached, true);
+      assert.equal(result.antigravity.primary_window.used_percent, 42);
+    } finally {
+      resetUsageLimitsCache();
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
@@ -1615,7 +1829,7 @@ describe("normalizeGeminiQuotaResponse", () => {
 });
 
 describe("normalizeAntigravityResponse", () => {
-  it("maps Claude, Gemini Pro, and Gemini Flash windows from GetUserStatus", () => {
+  it("groups chat models into Claude & GPT and Gemini families, picking weekly (most-used) and 5h (least-used) per group", () => {
     const result = normalizeAntigravityResponse({
       code: 0,
       userStatus: {
@@ -1627,28 +1841,38 @@ describe("normalizeAntigravityResponse", () => {
         },
         cascadeModelConfigData: {
           clientModelConfigs: [
+            // Claude group: Opus (14% remaining = weekly), Sonnet (100% = 5h)
+            {
+              label: "Claude Opus",
+              modelOrAlias: { model: "claude-opus-4" },
+              quotaInfo: {
+                remainingFraction: 0.14,
+                resetTime: "2026-07-05T00:00:00.000Z",
+              },
+            },
             {
               label: "Claude Sonnet",
               modelOrAlias: { model: "claude-sonnet-4" },
               quotaInfo: {
-                remainingFraction: 0.25,
-                resetTime: "2026-04-04T10:00:00.000Z",
+                remainingFraction: 1.0,
+                resetTime: "2026-06-28T10:00:00.000Z",
               },
             },
+            // Gemini group: Pro (45% remaining = weekly), Flash (100% = 5h)
             {
-              label: "Gemini Pro Low",
-              modelOrAlias: { model: "gemini-pro-low" },
+              label: "Gemini Pro",
+              modelOrAlias: { model: "gemini-pro" },
               quotaInfo: {
-                remainingFraction: 0.4,
-                resetTime: "2026-04-04T12:00:00.000Z",
+                remainingFraction: 0.45,
+                resetTime: "2026-07-05T00:00:00.000Z",
               },
             },
             {
               label: "Gemini Flash",
               modelOrAlias: { model: "gemini-flash" },
               quotaInfo: {
-                remainingFraction: 0.8,
-                resetTime: "2026-04-04T14:00:00.000Z",
+                remainingFraction: 1.0,
+                resetTime: "2026-06-28T10:00:00.000Z",
               },
             },
           ],
@@ -1658,9 +1882,14 @@ describe("normalizeAntigravityResponse", () => {
 
     assert.equal(result.account_email, "agent@example.com");
     assert.equal(result.account_plan, "Antigravity Pro");
-    assert.equal(result.primary_window.used_percent, 75);
-    assert.equal(result.secondary_window.used_percent, 60);
-    assert.equal(result.tertiary_window.used_percent, 20);
+    // Claude weekly: Opus at 0.14 → 86% used
+    assert.equal(result.primary_window.used_percent, 86);
+    // Claude 5h: Sonnet at 1.0 → 0% used
+    assert.equal(result.secondary_window.used_percent, 0);
+    // Gemini weekly: Pro at 0.45 → 55% used
+    assert.equal(result.tertiary_window.used_percent, 55);
+    // Gemini 5h: Flash at 1.0 → 0% used
+    assert.equal(result.quaternary_window.used_percent, 0);
   });
 
   it("supports GetCommandModelConfigs fallback payloads", () => {
@@ -1710,6 +1939,52 @@ lang      123 me    23u  IPv4 0x124                0t0  TCP 127.0.0.1:51235 (LIS
     assert.equal(result.pid, 123);
     assert.equal(result.csrfToken, "abc123");
     assert.equal(result.extensionPort, 42427);
+  });
+
+  it("detects agy CLI process from ps output (no csrf, no path)", async () => {
+    const commandRunner = () => ({
+      stdout: `
+456 agy
+`,
+      status: 0,
+    });
+
+    const result = await detectAntigravityProcess({ commandRunner });
+
+    assert.equal(result.configured, true);
+    assert.equal(result.pid, 456);
+    assert.equal(result.csrfToken, null);
+    assert.equal(result.extensionPort, null);
+  });
+
+  it("detects arch-suffixed language_server (macos_arm)", async () => {
+    const commandRunner = () => ({
+      stdout: `
+789 /Applications/Antigravity.app/Contents/MacOS/language_server_macos_arm --app_data_dir antigravity --csrf_token def456
+`,
+      status: 0,
+    });
+
+    const result = await detectAntigravityProcess({ commandRunner });
+
+    assert.equal(result.configured, true);
+    assert.equal(result.pid, 789);
+    assert.equal(result.csrfToken, "def456");
+  });
+
+  it("detects arch-suffixed language_server (macos_x64)", async () => {
+    const commandRunner = () => ({
+      stdout: `
+101 /Applications/Antigravity.app/Contents/MacOS/language_server_macos_x64 --app_data_dir antigravity --csrf_token ghi789
+`,
+      status: 0,
+    });
+
+    const result = await detectAntigravityProcess({ commandRunner });
+
+    assert.equal(result.configured, true);
+    assert.equal(result.pid, 101);
+    assert.equal(result.csrfToken, "ghi789");
   });
 
   it("persists live Antigravity quota for use after the process exits", async () => {
@@ -1898,7 +2173,8 @@ lang 123 me 22u IPv4 0x123 0t0 TCP 127.0.0.1:51234 (LISTEN)
         nowMs: Date.parse("2026-05-21T01:00:00.000Z"),
       });
 
-      assert.equal(result.configured, false);
+      assert.equal(result.configured, true);
+      assert.ok(result.error.includes("not running"), `expected "not running" message, got: ${result.error}`);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

@@ -772,6 +772,21 @@ function loadGeminiCredentials({ home, env } = {}) {
   }
 }
 
+function resolveAgyHome({ home } = {}) {
+  return path.join(home || os.homedir(), ".gemini", "antigravity-cli");
+}
+
+function loadAgyCredentials({ home } = {}) {
+  const agyHome = resolveAgyHome({ home });
+  const tokenPath = path.join(agyHome, "antigravity-oauth-token");
+  if (!fs.existsSync(tokenPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(tokenPath, "utf8"));
+  } catch (_error) {
+    return null;
+  }
+}
+
 function resolveSymlinkOnce(filePath) {
   try {
     const resolved = fs.readlinkSync(filePath);
@@ -853,6 +868,44 @@ async function extractGeminiOauthClientCredentials({ commandRunner, home } = {})
   return null;
 }
 
+async function extractAgyOauthClientCredentials({ commandRunner } = {}) {
+  const result = await runCommand(commandRunner, "which", ["agy"], { timeout: 2000 });
+  const agyPath = typeof result?.stdout === "string" ? result.stdout.trim() : "";
+  if (!agyPath || !fs.existsSync(agyPath)) return null;
+
+  // Use grep to extract the OAuth client ID from the Go binary (faster than
+  // full strings on a ~170MB binary). The client_secret is not available as a
+  // plain-text string in agy's Go binary — it uses PKCE or a non-refreshable
+  // public client pattern — so we return an empty secret and let the caller
+  // decide whether to attempt a secret-less refresh.
+  const grepResult = await runCommand(commandRunner, "grep", [
+    "-a", "-o", "-m1", "-E",
+    "[0-9]+-[a-zA-Z0-9]+\\.apps\\.googleusercontent\\.com",
+    agyPath,
+  ], { timeout: 15000 });
+
+  // grep -m1 stops at the first matching LINE, but with -o it can emit
+  // multiple matches on that one line. Take only the first match.
+  const rawStdout = typeof grepResult?.stdout === "string" ? grepResult.stdout.trim() : "";
+  const clientId = rawStdout.split("\n")[0]?.trim() || "";
+  if (!clientId || clientId.length < 20) return null;
+  return { clientId, clientSecret: "" };
+}
+
+function formatOauthRefreshError(source) {
+  return `Gemini API error: Could not find ${source} OAuth configuration`;
+}
+
+// Try both gemini-cli and agy OAuth client credentials. Returns the first
+// successfully extracted set, or null if neither is available.
+async function extractAnyOauthClientCredentials({ commandRunner, home } = {}) {
+  const gemini = await extractGeminiOauthClientCredentials({ commandRunner, home }).catch(() => null);
+  if (gemini?.clientId && gemini?.clientSecret) return { ...gemini, source: "gemini-cli" };
+  const agy = await extractAgyOauthClientCredentials({ commandRunner }).catch(() => null);
+  if (agy?.clientId) return { ...agy, source: "agy" };
+  return null;
+}
+
 async function refreshGeminiAccessToken({
   refreshToken,
   home,
@@ -860,17 +913,19 @@ async function refreshGeminiAccessToken({
   fetchImpl = fetch,
   commandRunner,
 }) {
-  const oauthClient = await extractGeminiOauthClientCredentials({ commandRunner, home });
-  if (!oauthClient?.clientId || !oauthClient?.clientSecret) {
-    throw new Error("Gemini API error: Could not find Gemini CLI OAuth configuration");
+  const oauthClient = await extractAnyOauthClientCredentials({ commandRunner, home });
+  if (!oauthClient?.clientId) {
+    throw new Error(formatOauthRefreshError("Gemini CLI or agy"));
   }
 
   const body = new URLSearchParams({
     client_id: oauthClient.clientId,
-    client_secret: oauthClient.clientSecret,
-    refresh_token: refreshToken,
     grant_type: "refresh_token",
   });
+  if (oauthClient.clientSecret) {
+    body.set("client_secret", oauthClient.clientSecret);
+  }
+  body.set("refresh_token", refreshToken);
 
   const res = await fetchImpl("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -1003,12 +1058,41 @@ function normalizeGeminiQuotaResponse({ buckets, email, tier }) {
   };
 }
 
+async function fetchGeminiLimitsWithAgyToken(agyTokenData, { accessToken, fetchImpl, codeAssist }) {
+  const claims = decodeJwtPayload(accessToken);
+  const res = await fetchImpl("https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(codeAssist?.projectId ? { project: codeAssist.projectId } : {}),
+  });
+  if (res.status === 401) {
+    throw new Error("Not logged in to Gemini. Run 'gemini' in Terminal to authenticate.");
+  }
+  if (!res.ok) {
+    throw new Error(`Gemini API error: HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  return {
+    configured: true,
+    error: null,
+    ...normalizeGeminiQuotaResponse({
+      buckets: json?.buckets,
+      email: claims?.email || null,
+      tier: codeAssist?.tier || null,
+    }),
+  };
+}
+
 async function fetchGeminiLimits({ home, env, fetchImpl = fetch, commandRunner } = {}) {
-  const settings = loadGeminiSettings({ home, env });
-  const selectedType = settings?.security?.auth?.selectedType ?? null;
-  if (!settings && !loadGeminiCredentials({ home, env })) {
+  if (!(await isBinaryAvailable("gemini", { commandRunner }))) {
     return { configured: false };
   }
+
+  const settings = loadGeminiSettings({ home, env });
+  const selectedType = settings?.security?.auth?.selectedType ?? null;
   if (selectedType === "api-key") {
     return { configured: true, error: "Gemini API key auth not supported. Use Google account (OAuth) instead." };
   }
@@ -1017,49 +1101,30 @@ async function fetchGeminiLimits({ home, env, fetchImpl = fetch, commandRunner }
   }
 
   const creds = loadGeminiCredentials({ home, env });
+
   if (!creds?.access_token) {
+    if (!settings) {
+      return { configured: false };
+    }
     return { configured: true, error: "Not logged in to Gemini. Run 'gemini' in Terminal to authenticate." };
   }
 
-  try {
-    let accessToken = creds.access_token;
-    const expiry = Number(creds.expiry_date);
-    if (Number.isFinite(expiry) && expiry > 0 && expiry < Date.now() && creds.refresh_token) {
+  // Shared helper: refresh token if expired, then fetch code assist + quota
+  const resolveWithCredentials = async (tokenData) => {
+    let accessToken = tokenData.access_token;
+    const expiry = Number(tokenData.expiry_date);
+    const refreshToken = tokenData.refresh_token;
+    if (Number.isFinite(expiry) && expiry > 0 && expiry < Date.now() && refreshToken) {
       accessToken = await refreshGeminiAccessToken({
-        refreshToken: creds.refresh_token,
-        home,
-        env,
-        fetchImpl,
-        commandRunner,
+        refreshToken, home, env, fetchImpl, commandRunner,
       });
     }
-
-    const claims = decodeJwtPayload(creds.id_token);
     const codeAssist = await loadGeminiCodeAssistStatus(accessToken, { fetchImpl });
-    const res = await fetchImpl("https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(codeAssist.projectId ? { project: codeAssist.projectId } : {}),
-    });
-    if (res.status === 401) {
-      throw new Error("Not logged in to Gemini. Run 'gemini' in Terminal to authenticate.");
-    }
-    if (!res.ok) {
-      throw new Error(`Gemini API error: HTTP ${res.status}`);
-    }
-    const json = await res.json();
-    return {
-      configured: true,
-      error: null,
-      ...normalizeGeminiQuotaResponse({
-        buckets: json?.buckets,
-        email: claims?.email || null,
-        tier: codeAssist.tier,
-      }),
-    };
+    return fetchGeminiLimitsWithAgyToken(tokenData, { accessToken, fetchImpl, codeAssist });
+  };
+
+  try {
+    return await resolveWithCredentials(creds);
   } catch (error) {
     return {
       configured: true,
@@ -1594,6 +1659,10 @@ function parseProcessLine(line) {
 
 function isAntigravityCommandLine(command) {
   const lower = String(command || "").toLowerCase();
+  // The agy CLI binary itself runs as a server with Connect-RPC endpoints
+  if (/^agy(\s|$)/.test(lower)) return true;
+  // IDE language_server with arch suffixes (_macos_arm, _macos_x64, .exe)
+  if (/language_server(?:_macos(?:_(?:arm|x64))?|\.exe)?\b/i.test(command)) return true;
   return lower.includes("language_server")
     && (
       (lower.includes("--app_data_dir") && lower.includes("antigravity"))
@@ -1621,8 +1690,7 @@ async function detectAntigravityProcess({ commandRunner } = {}) {
     if (!parsed) continue;
     if (!isAntigravityCommandLine(parsed.command)) continue;
     sawProcess = true;
-    const csrfToken = extractCommandFlag(parsed.command, "--csrf_token");
-    if (!csrfToken) continue;
+    const csrfToken = extractCommandFlag(parsed.command, "--csrf_token") || null;
     const extensionPort = extractFirstNumber(extractCommandFlag(parsed.command, "--extension_server_port"));
     return {
       configured: true,
@@ -1657,7 +1725,7 @@ function isCacheWindowUsable(window, { cachedAtMs, nowMs } = {}) {
 }
 
 function hasAntigravityWindow(limits) {
-  return Boolean(limits?.primary_window || limits?.secondary_window || limits?.tertiary_window);
+  return Boolean(limits?.primary_window || limits?.secondary_window || limits?.tertiary_window || limits?.quaternary_window);
 }
 
 function normalizeAntigravityCachedLimits(raw, { nowMs = Date.now() } = {}) {
@@ -1674,6 +1742,7 @@ function normalizeAntigravityCachedLimits(raw, { nowMs = Date.now() } = {}) {
     primary_window: isCacheWindowUsable(raw?.primary_window, { cachedAtMs, nowMs }) ? raw.primary_window : null,
     secondary_window: isCacheWindowUsable(raw?.secondary_window, { cachedAtMs, nowMs }) ? raw.secondary_window : null,
     tertiary_window: isCacheWindowUsable(raw?.tertiary_window, { cachedAtMs, nowMs }) ? raw.tertiary_window : null,
+    quaternary_window: isCacheWindowUsable(raw?.quaternary_window, { cachedAtMs, nowMs }) ? raw.quaternary_window : null,
     cached: true,
     cached_at: raw.cached_at,
   };
@@ -1700,6 +1769,7 @@ function writeAntigravityLimitsCache(limits, { home, nowMs = Date.now() } = {}) 
       primary_window: limits.primary_window || null,
       secondary_window: limits.secondary_window || null,
       tertiary_window: limits.tertiary_window || null,
+      quaternary_window: limits.quaternary_window || null,
       cached_at: new Date(nowMs).toISOString(),
     },
   };
@@ -1915,6 +1985,14 @@ function requestLocalJson({
   const client = scheme === "https" ? https : http;
   return new Promise((resolve, reject) => {
     const rawBody = JSON.stringify(body);
+    const headers = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(rawBody),
+      "Connect-Protocol-Version": "1",
+    };
+    if (csrfToken) {
+      headers["X-Codeium-Csrf-Token"] = csrfToken;
+    }
     const req = client.request(
       {
         hostname: "127.0.0.1",
@@ -1923,12 +2001,7 @@ function requestLocalJson({
         method: "POST",
         rejectUnauthorized: false,
         timeout: timeoutMs,
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(rawBody),
-          "Connect-Protocol-Version": "1",
-          "X-Codeium-Csrf-Token": csrfToken,
-        },
+        headers,
       },
       (res) => {
         let data = "";
@@ -2019,36 +2092,6 @@ function antigravityPriority(model) {
   return 0;
 }
 
-function chooseAntigravityModel(models, family) {
-  const candidates = models
-    .filter((model) => antigravityFamily(model) === family)
-    .map((model) => ({
-      model,
-      priority: antigravityPriority(model),
-      remaining:
-        typeof model.remaining_fraction === "number"
-          ? model.remaining_fraction
-          : Number.POSITIVE_INFINITY,
-    }))
-    .filter((entry) => entry.priority !== null);
-
-  if (!candidates.length) return null;
-  candidates.sort((a, b) => {
-    if (a.priority !== b.priority) return a.priority - b.priority;
-    return a.remaining - b.remaining;
-  });
-  return candidates[0].model;
-}
-
-function makeAntigravityWindow(model) {
-  if (!model) return null;
-  const remaining = typeof model.remaining_fraction === "number" ? model.remaining_fraction * 100 : 0;
-  return buildWindow({
-    usedPercent: 100 - remaining,
-    resetAt: model.reset_at,
-  });
-}
-
 function normalizeAntigravityResponse(body, { fallbackToConfigs = false } = {}) {
   if (!antigravityCodeIsOk(body?.code)) {
     throw new Error(`Antigravity API error: ${body?.code}`);
@@ -2058,21 +2101,40 @@ function normalizeAntigravityResponse(body, { fallbackToConfigs = false } = {}) 
   const configs = fallbackToConfigs
     ? body?.clientModelConfigs
     : userStatus?.cascadeModelConfigData?.clientModelConfigs;
-  const models = parseAntigravityModelConfigs(configs);
-  if (!models.length) {
+  const allModels = parseAntigravityModelConfigs(configs);
+  if (!allModels.length) {
     throw new Error("Could not parse Antigravity quota: no quota models available.");
   }
 
-  const primary = chooseAntigravityModel(models, "claude");
-  const secondary = chooseAntigravityModel(models, "gemini_pro");
-  const tertiary = chooseAntigravityModel(models, "gemini_flash");
-  const fallback = !primary && !secondary && !tertiary
-    ? [...models].sort((a, b) => {
-        const aRemaining = typeof a.remaining_fraction === "number" ? a.remaining_fraction : Number.POSITIVE_INFINITY;
-        const bRemaining = typeof b.remaining_fraction === "number" ? b.remaining_fraction : Number.POSITIVE_INFINITY;
-        return aRemaining - bRemaining;
-      })[0]
-    : null;
+  // Keep only chat models (skip autocomplete/lite/tab models)
+  const chatModels = allModels.filter((m) => antigravityPriority(m) !== null);
+  const models = chatModels.length ? chatModels : allModels;
+
+  // Group chat models and pick the most-used (lowest remaining → weekly quota)
+  // and least-used (highest remaining → 5h rolling quota) per family.
+  const claudeModels = models.filter((m) => antigravityFamily(m) === "claude");
+  const geminiModels = models.filter(
+    (m) => antigravityFamily(m) === "gemini_pro" || antigravityFamily(m) === "gemini_flash",
+  );
+
+  const pickMin = (list) => {
+    const sorted = [...list].filter((m) => typeof m.remaining_fraction === "number");
+    if (!sorted.length) return list[0] || null;
+    sorted.sort((a, b) => a.remaining_fraction - b.remaining_fraction);
+    return sorted[0];
+  };
+  const pickMax = (list) => {
+    const sorted = [...list].filter((m) => typeof m.remaining_fraction === "number");
+    if (!sorted.length) return list[list.length - 1] || null;
+    sorted.sort((a, b) => b.remaining_fraction - a.remaining_fraction);
+    return sorted[0];
+  };
+
+  const makeWindow = (model) => {
+    if (!model) return null;
+    const remaining = typeof model.remaining_fraction === "number" ? model.remaining_fraction * 100 : 0;
+    return buildWindow({ usedPercent: 100 - remaining, resetAt: model.reset_at });
+  };
 
   return {
     account_email: typeof userStatus?.email === "string" ? userStatus.email : null,
@@ -2083,16 +2145,52 @@ function normalizeAntigravityResponse(body, { fallbackToConfigs = false } = {}) 
       || userStatus?.planStatus?.planInfo?.planName
       || userStatus?.planStatus?.planInfo?.planShortName
       || null,
-    primary_window: makeAntigravityWindow(primary || fallback),
-    secondary_window: makeAntigravityWindow(secondary),
-    tertiary_window: makeAntigravityWindow(tertiary),
+    primary_window: makeWindow(claudeModels.length ? pickMin(claudeModels) : pickMin(models)),
+    secondary_window: makeWindow(claudeModels.length ? pickMax(claudeModels) : null),
+    tertiary_window: makeWindow(geminiModels.length ? pickMin(geminiModels) : pickMin(models)),
+    quaternary_window: makeWindow(geminiModels.length ? pickMax(geminiModels) : null),
   };
 }
 
-async function probeAntigravityPort(port, csrfToken, { timeoutMs, requestFn } = {}) {
+function normalizeAntigravityQuotaSummary(body) {
+  if (!antigravityCodeIsOk(body?.code)) {
+    throw new Error(`Antigravity API error: ${body?.code}`);
+  }
+
+  const groups = body?.response?.groups;
+  if (!Array.isArray(groups) || !groups.length) {
+    throw new Error("Could not parse Antigravity quota summary: no groups.");
+  }
+
+  // Map bucketId → window, regardless of which group they live in
+  const makeWindow = (remainingFraction, resetTime) => {
+    if (typeof remainingFraction !== "number") return null;
+    return buildWindow({ usedPercent: 100 - remainingFraction * 100, resetAt: resetTime || null });
+  };
+
+  // Collect all buckets into a flat bucketId-keyed map
+  const buckets = {};
+  for (const group of groups) {
+    if (!Array.isArray(group.buckets)) continue;
+    for (const b of group.buckets) {
+      buckets[b.bucketId] = b;
+    }
+  }
+
+  return {
+    account_email: null, // quota summary doesn't include email
+    account_plan: null,  // quota summary doesn't include plan info
+    primary_window: makeWindow(buckets["3p-weekly"]?.remainingFraction, buckets["3p-weekly"]?.resetTime),
+    secondary_window: makeWindow(buckets["3p-5h"]?.remainingFraction, buckets["3p-5h"]?.resetTime),
+    tertiary_window: makeWindow(buckets["gemini-weekly"]?.remainingFraction, buckets["gemini-weekly"]?.resetTime),
+    quaternary_window: makeWindow(buckets["gemini-5h"]?.remainingFraction, buckets["gemini-5h"]?.resetTime),
+  };
+}
+
+async function probeAntigravityPort(port, csrfToken, { timeoutMs, requestFn, scheme = "https" } = {}) {
   try {
     await requestLocalJson({
-      scheme: "https",
+      scheme,
       port,
       path: "/exa.language_server_pb.LanguageServerService/GetUnleashData",
       body: antigravityUnleashBody(),
@@ -2106,10 +2204,15 @@ async function probeAntigravityPort(port, csrfToken, { timeoutMs, requestFn } = 
   }
 }
 
-async function fetchAntigravityLimits({ home, commandRunner, requestFn, timeoutMs = 8000, nowMs = Date.now() } = {}) {
+async function fetchAntigravityLimits({ home, commandRunner, requestFn, fetchImpl = fetch, timeoutMs = 8000, nowMs = Date.now() } = {}) {
   const processInfo = await detectAntigravityProcess({ commandRunner });
   if (!processInfo.configured) {
-    return readAntigravityLimitsCache({ home, nowMs }) || { configured: false };
+    const cached = readAntigravityLimitsCache({ home, nowMs });
+    if (cached) return cached;
+    // No language server process and no cache — can't fetch live limits.
+    // The agy fallback was removed because it returns Google Cloud/Gemini
+    // quota data, not Antigravity-specific Claude/GPT quotas.
+    return { configured: true, error: "Antigravity IDE is not running. Launch Antigravity to see usage limits." };
   }
   if (processInfo.error) {
     return { configured: true, error: processInfo.error };
@@ -2125,13 +2228,32 @@ async function fetchAntigravityLimits({ home, commandRunner, requestFn, timeoutM
     return result;
   };
 
+  const finalizeQuotaSummary = (payload) => {
+    const result = {
+      configured: true,
+      error: null,
+      ...normalizeAntigravityQuotaSummary(payload),
+    };
+    writeAntigravityLimitsCache(result, { home, nowMs });
+    return result;
+  };
+
   try {
     const ports = await listAntigravityPorts(processInfo.pid, { commandRunner });
     let workingPort = null;
+    let workingScheme = "https";
     for (const port of ports) {
       if (await probeAntigravityPort(port, processInfo.csrfToken, { timeoutMs, requestFn })) {
         workingPort = port;
         break;
+      }
+      // agy CLI serves both HTTPS and HTTP; no CSRF needed
+      if (!processInfo.csrfToken) {
+        if (await probeAntigravityPort(port, null, { timeoutMs, requestFn, scheme: "http" })) {
+          workingPort = port;
+          workingScheme = "http";
+          break;
+        }
       }
     }
     if (!workingPort) {
@@ -2139,8 +2261,23 @@ async function fetchAntigravityLimits({ home, commandRunner, requestFn, timeoutM
     }
 
     try {
+      const quotaSummary = await requestLocalJson({
+        scheme: workingScheme,
+        port: workingPort,
+        path: "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary",
+        body: antigravityDefaultBody(),
+        csrfToken: processInfo.csrfToken,
+        timeoutMs,
+        requestFn,
+      });
+      return finalizeQuotaSummary(quotaSummary);
+    } catch (_quotaError) {
+      // quota summary not available (IDE servers return 404) → fall back to GetUserStatus
+    }
+
+    try {
       const userStatus = await requestLocalJson({
-        scheme: "https",
+        scheme: workingScheme,
         port: workingPort,
         path: "/exa.language_server_pb.LanguageServerService/GetUserStatus",
         body: antigravityDefaultBody(),
@@ -2154,8 +2291,12 @@ async function fetchAntigravityLimits({ home, commandRunner, requestFn, timeoutM
         Number.isFinite(processInfo.extensionPort) && processInfo.extensionPort > 0
           ? processInfo.extensionPort
           : workingPort;
+      // agy has no extension server port; try HTTP on the same port
+      const fallbackScheme = !processInfo.csrfToken && fallbackPort === workingPort
+        ? (workingScheme === "https" ? "http" : "https")
+        : (fallbackPort === workingPort ? "https" : "http");
       const modelConfigs = await requestLocalJson({
-        scheme: fallbackPort === workingPort ? "https" : "http",
+        scheme: fallbackScheme,
         port: fallbackPort,
         path: "/exa.language_server_pb.LanguageServerService/GetCommandModelConfigs",
         body: antigravityDefaultBody(),
@@ -2315,7 +2456,7 @@ async function fetchUsageLimitsUncached({
     withProviderTimeout(fetchGeminiLimits({ home, env, fetchImpl: providerFetch, commandRunner }), "Gemini", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     fetchKiroLimits({ commandRunner, now }),
-    fetchAntigravityLimits({ home, commandRunner, requestFn, nowMs }),
+    fetchAntigravityLimits({ home, commandRunner, requestFn, fetchImpl: providerFetch, nowMs }),
     withProviderTimeout(fetchCopilotLimits({ home, env, fetchImpl: providerFetch, platform, securityRunner }), "GitHub Copilot", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     withProviderTimeout(fetchGrokLimits({ home, env, fetchImpl: providerFetch }), "Grok Build", providerTimeoutMs)
@@ -2426,6 +2567,8 @@ module.exports = {
   resetUsageLimitsCache,
   runCommand,
   extractGeminiOauthClientCredentials,
+  extractAgyOauthClientCredentials,
+  loadAgyCredentials,
   loadKimiCredentials,
   normalizeCursorUsageSummary,
   normalizeGeminiQuotaResponse,

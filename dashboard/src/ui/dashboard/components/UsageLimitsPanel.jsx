@@ -116,7 +116,7 @@ function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePerc
  * pace status + a current-rate projection. Used %, reset time live on the bar.
  */
 function explainLineFor(spec, pace, mode) {
-  const label = copy(spec.labelKey);
+  const label = spec.label ?? copy(spec.labelKey);
   const remaining = mode === LIMIT_DISPLAY_MODES.REMAINING;
   // In remaining mode every percentage flips to "how much is left".
   const projection = (usedPct) => (remaining ? 100 - usedPct : usedPct);
@@ -156,7 +156,20 @@ function LimitDetail({ rows, mode }) {
   );
 }
 
-function ToolGroup({ name, providerId, children, expandable = false, expanded = false, onToggle }) {
+function ago(iso) {
+  if (!iso) return null;
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 0) return null;
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "now";
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  return `${d}d`;
+}
+
+function ToolGroup({ name, providerId, children, expandable = false, expanded = false, onToggle, badge = null }) {
   const providerKey = limitProviderIconKey(providerId);
   const header = (
     <div className="flex items-center gap-1.5">
@@ -164,6 +177,7 @@ function ToolGroup({ name, providerId, children, expandable = false, expanded = 
         <ProviderIcon provider={providerKey} size={14} className={LIMITS_PROVIDER_ICON_CLASS} />
       ) : null}
       <span className="text-sm font-medium text-oai-black dark:text-oai-white">{name}</span>
+      {badge}
     </div>
   );
 
@@ -213,7 +227,7 @@ function LimitWindowSection({ rows, mode, extra = null }) {
       {rows.map(({ spec, pace }) => (
         <LimitBar
           key={spec.key}
-          label={copy(spec.labelKey)}
+          label={spec.label ?? copy(spec.labelKey)}
           pct={readWindowPct(spec.window, spec.pctField)}
           reset={formatReset(readWindowReset(spec.window, spec.resetField))}
           mode={mode}
@@ -284,7 +298,7 @@ function renderProviderExtra(kind, data) {
   return null;
 }
 
-function renderConfiguredProvider(id, data, title, mode, expanded, onToggle) {
+function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, badge = null) {
   const spec = PROVIDER_LIMIT_SPECS[id];
   if (!spec) return null;
   // Pace is computed once per window here and shared by the bar + the detail.
@@ -294,7 +308,7 @@ function renderConfiguredProvider(id, data, title, mode, expanded, onToggle) {
     .map((s) => ({ spec: s, pace: paceForSpec(s, mode) }));
   const extra = renderProviderExtra(spec.extra, data);
   return (
-    <ToolGroup key={id} name={title} providerId={id} expandable={rows.length > 0} expanded={expanded} onToggle={onToggle}>
+    <ToolGroup key={id} name={title} providerId={id} expandable={rows.length > 0} expanded={expanded} onToggle={onToggle} badge={badge}>
       <LimitWindowSection mode={mode} rows={rows} extra={extra} />
       {expanded ? <LimitDetail rows={rows} mode={mode} /> : null}
     </ToolGroup>
@@ -320,7 +334,12 @@ function renderProviderGroup(id, data, mode, expanded, onToggle) {
 
   const baseName = limitProviderName(id);
   const title = data.plan_label ? `${baseName} ${data.plan_label}` : baseName;
-  return renderConfiguredProvider(id, data, title, mode, expanded, onToggle);
+  const badge = id === "antigravity" && data.cached
+    ? <span className="ml-1.5 text-[10px] text-oai-gray-400 dark:text-oai-gray-500 bg-oai-gray-100 dark:bg-oai-gray-800 px-1.5 py-0.5 rounded leading-normal">{ago(data.cached_at) ? `cached · ${ago(data.cached_at)} ago` : "cached"}</span>
+    : id === "antigravity"
+      ? <span className="ml-1.5 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded leading-normal">live</span>
+      : null;
+  return renderConfiguredProvider(id, data, title, mode, expanded, onToggle, badge);
 }
 
 function CopilotOtelHint({ defaultDir }) {

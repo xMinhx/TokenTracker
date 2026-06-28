@@ -584,9 +584,10 @@ limits.codex_reset_bank.count_only,ui,LimitsPage,UsageLimitsPanel,codex_reset_ba
 limits.label.gemini_pro,ui,LimitsPage,UsageLimitsPanel,gemini_pro,"Pro",,active
 limits.label.gemini_flash,ui,LimitsPage,UsageLimitsPanel,gemini_flash,"Flash",,active
 limits.label.gemini_lite,ui,LimitsPage,UsageLimitsPanel,gemini_lite,"Lite",,active
-limits.label.antigravity_claude,ui,LimitsPage,UsageLimitsPanel,antigravity_claude,"Claude",,active
-limits.label.antigravity_gpro,ui,LimitsPage,UsageLimitsPanel,antigravity_gpro,"G Pro",,active
-limits.label.antigravity_flash,ui,LimitsPage,UsageLimitsPanel,antigravity_flash,"Flash",,active
+limits.label.antigravity_claude_weekly,ui,LimitsPage,UsageLimitsPanel,antigravity_claude_weekly,"Claude - Weekly",,active
+limits.label.antigravity_claude_5h,ui,LimitsPage,UsageLimitsPanel,antigravity_claude_5h,"Claude - 5h",,active
+limits.label.antigravity_gemini_weekly,ui,LimitsPage,UsageLimitsPanel,antigravity_gemini_weekly,"Gemini - Weekly",,active
+limits.label.antigravity_gemini_5h,ui,LimitsPage,UsageLimitsPanel,antigravity_gemini_5h,"Gemini - 5h",,active
 limits.bar.sub_one_percent,ui,LimitsPage,UsageLimitsPanel,bar_sub_one_percent,"<1",,active
 limits.status.not_connected,ui,LimitsPage,UsageLimitsPanel,status_not_connected,"Not connected",,active
 limits.status.no_data,ui,LimitsPage,UsageLimitsPanel,status_no_data,"No live limit data returned",,active
