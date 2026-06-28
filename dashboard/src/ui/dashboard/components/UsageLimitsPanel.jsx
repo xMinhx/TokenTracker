@@ -161,7 +161,7 @@ function ago(iso) {
   const diff = Date.now() - new Date(iso).getTime();
   if (diff < 0) return null;
   const m = Math.floor(diff / 60000);
-  if (m < 1) return "now";
+  if (m < 1) return copy("shared.time.now");
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h`;
@@ -334,11 +334,19 @@ function renderProviderGroup(id, data, mode, expanded, onToggle) {
 
   const baseName = limitProviderName(id);
   const title = data.plan_label ? `${baseName} ${data.plan_label}` : baseName;
-  const badge = id === "antigravity" && data.cached
-    ? <span className="ml-1.5 text-[10px] text-oai-gray-400 dark:text-oai-gray-500 bg-oai-gray-100 dark:bg-oai-gray-800 px-1.5 py-0.5 rounded leading-normal">{ago(data.cached_at) ? `cached · ${ago(data.cached_at)} ago` : "cached"}</span>
-    : id === "antigravity"
-      ? <span className="ml-1.5 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded leading-normal">live</span>
-      : null;
+  let badge = null;
+  if (id === "antigravity") {
+    if (data.cached) {
+      const suffix = ago(data.cached_at);
+      badge = (
+        <span className="ml-1.5 text-[10px] text-oai-gray-400 dark:text-oai-gray-500 bg-oai-gray-100 dark:bg-oai-gray-800 px-1.5 py-0.5 rounded leading-normal">
+          {copy("limits.label.antigravity_cached")}{suffix ? <>&nbsp;·&nbsp;{suffix}</> : null}
+        </span>
+      );
+    } else {
+      badge = <span className="ml-1.5 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded leading-normal">{copy("limits.label.antigravity_live")}</span>;
+    }
+  }
   return renderConfiguredProvider(id, data, title, mode, expanded, onToggle, badge);
 }
 

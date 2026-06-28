@@ -588,6 +588,8 @@ limits.label.antigravity_claude_weekly,ui,LimitsPage,UsageLimitsPanel,antigravit
 limits.label.antigravity_claude_5h,ui,LimitsPage,UsageLimitsPanel,antigravity_claude_5h,"Claude - 5h",,active
 limits.label.antigravity_gemini_weekly,ui,LimitsPage,UsageLimitsPanel,antigravity_gemini_weekly,"Gemini - 7d",,active
 limits.label.antigravity_gemini_5h,ui,LimitsPage,UsageLimitsPanel,antigravity_gemini_5h,"Gemini - 5h",,active
+limits.label.antigravity_live,ui,LimitsPage,UsageLimitsPanel,antigravity_live,"live",,active
+limits.label.antigravity_cached,ui,LimitsPage,UsageLimitsPanel,antigravity_cached,"cached",,active
 limits.bar.sub_one_percent,ui,LimitsPage,UsageLimitsPanel,bar_sub_one_percent,"<1",,active
 limits.status.not_connected,ui,LimitsPage,UsageLimitsPanel,status_not_connected,"Not connected",,active
 limits.status.no_data,ui,LimitsPage,UsageLimitsPanel,status_no_data,"No live limit data returned",,active

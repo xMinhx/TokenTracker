@@ -171,6 +171,8 @@
   "limits.label.antigravity_claude_5h": "Claude - 5h",
   "limits.label.antigravity_gemini_weekly": "Gemini - 7d",
   "limits.label.antigravity_gemini_5h": "Gemini - 5h",
+  "limits.label.antigravity_live": "live",
+  "limits.label.antigravity_cached": "cached",
   "limits.bar.sub_one_percent": "<1",
   "limits.status.not_connected": "연결되지 않음",
   "limits.status.no_data": "실시간 한도 데이터가 반환되지 않았습니다",
