@@ -398,6 +398,51 @@ test("parseRolloutIncremental uses turn_context cwd to resolve project context",
   }
 });
 
+test("parseRolloutIncremental skips unchanged files when project state is disabled", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "2026", "01", "26");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const rolloutPath = path.join(sessionsDir, "rollout-test.jsonl");
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    await fs.writeFile(
+      rolloutPath,
+      [
+        buildTurnContextLine({ model: "gpt-4" }),
+        buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(first.filesProcessed, 1);
+
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(second.filesProcessed, 0);
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(second.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseRolloutIncremental uses session_meta cwd to resolve project context", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
   try {
@@ -2609,6 +2654,8 @@ test("parseClaudeIncremental aggregates usage into half-hour buckets", async () 
       cursors,
       queuePath,
     });
+    assert.equal(resAgain.filesProcessed, 0);
+    assert.equal(resAgain.eventsAggregated, 0);
     assert.equal(resAgain.bucketsQueued, 0);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });

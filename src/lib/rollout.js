@@ -151,6 +151,20 @@ async function parseRolloutIncremental({
     const lastTotal = prev && prev.inode === inode ? prev.lastTotal || null : null;
     const lastModel = prev && prev.inode === inode ? prev.lastModel || null : null;
 
+    if (!projectEnabled && prev && prev.inode === inode && startOffset >= st.size) {
+      if (cb) {
+        cb({
+          index: idx + 1,
+          total: totalFiles,
+          filePath,
+          filesProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+      continue;
+    }
+
     const projectContext = projectEnabled
       ? await resolveProjectContextForFile({
           filePath,
@@ -165,6 +179,7 @@ async function parseRolloutIncremental({
 
     const result = await parseRolloutFile({
       filePath,
+      fileStat: st,
       startOffset,
       lastTotal,
       lastModel,
@@ -269,6 +284,20 @@ async function parseClaudeIncremental({
     const inode = st.ino || 0;
     const startOffset = prev && prev.inode === inode ? prev.offset || 0 : 0;
 
+    if (!projectEnabled && prev && prev.inode === inode && startOffset >= st.size) {
+      if (cb) {
+        cb({
+          index: idx + 1,
+          total: totalFiles,
+          filePath,
+          filesProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+      continue;
+    }
+
     const projectContext = projectEnabled
       ? await resolveProjectContextForFile({
           filePath,
@@ -283,6 +312,7 @@ async function parseClaudeIncremental({
 
     const result = await parseClaudeFile({
       filePath,
+      fileStat: st,
       startOffset,
       hourlyState,
       touchedBuckets,
@@ -770,6 +800,7 @@ function codexSessionIdFromPath(filePath) {
 
 async function parseRolloutFile({
   filePath,
+  fileStat,
   startOffset,
   lastTotal,
   lastModel,
@@ -786,7 +817,7 @@ async function parseRolloutFile({
   seenCodexEvents,
   sessionId,
 }) {
-  const st = await fs.stat(filePath);
+  const st = fileStat || (await fs.stat(filePath));
   const endOffset = st.size;
   if (startOffset >= endOffset) {
     return { endOffset, lastTotal, lastModel, eventsAggregated: 0 };
@@ -926,6 +957,7 @@ async function parseRolloutFile({
 
 async function parseClaudeFile({
   filePath,
+  fileStat,
   startOffset,
   hourlyState,
   touchedBuckets,
@@ -936,7 +968,7 @@ async function parseClaudeFile({
   projectKey,
   seenMessageHashes,
 }) {
-  const st = await fs.stat(filePath).catch(() => null);
+  const st = fileStat || (await fs.stat(filePath).catch(() => null));
   if (!st || !st.isFile()) return { endOffset: startOffset, eventsAggregated: 0 };
 
   const endOffset = st.size;
