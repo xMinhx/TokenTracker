@@ -147,11 +147,14 @@ async function parseRolloutIncremental({
     const key = filePath;
     const prev = cursors.files[key] || null;
     const inode = st.ino || 0;
-    const startOffset = prev && prev.inode === inode ? prev.offset || 0 : 0;
-    const lastTotal = prev && prev.inode === inode ? prev.lastTotal || null : null;
-    const lastModel = prev && prev.inode === inode ? prev.lastModel || null : null;
+    const sameInode = prev && prev.inode === inode;
+    const prevOffset = sameInode ? prev.offset || 0 : 0;
+    const truncated = sameInode && prevOffset > st.size;
+    const startOffset = sameInode && !truncated ? prevOffset : 0;
+    const lastTotal = sameInode && !truncated ? prev.lastTotal || null : null;
+    const lastModel = sameInode && !truncated ? prev.lastModel || null : null;
 
-    if (!projectEnabled && prev && prev.inode === inode && startOffset >= st.size) {
+    if (!projectEnabled && sameInode && !truncated && startOffset >= st.size) {
       if (cb) {
         cb({
           index: idx + 1,
@@ -282,9 +285,12 @@ async function parseClaudeIncremental({
     const key = filePath;
     const prev = cursors.files[key] || null;
     const inode = st.ino || 0;
-    const startOffset = prev && prev.inode === inode ? prev.offset || 0 : 0;
+    const sameInode = prev && prev.inode === inode;
+    const prevOffset = sameInode ? prev.offset || 0 : 0;
+    const truncated = sameInode && prevOffset > st.size;
+    const startOffset = sameInode && !truncated ? prevOffset : 0;
 
-    if (!projectEnabled && prev && prev.inode === inode && startOffset >= st.size) {
+    if (!projectEnabled && sameInode && !truncated && startOffset >= st.size) {
       if (cb) {
         cb({
           index: idx + 1,
