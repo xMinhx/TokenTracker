@@ -66,12 +66,11 @@ export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectD
     }
   }
 
-  // 1. 空状态优雅渲染
+  // Empty state (defensive: today the card is only mounted with >= 2 devices).
   if (devices.length === 0) {
     return (
       <Card bodyClassName="!px-3 !py-3.5">
         <div className="flex items-center justify-between gap-2 mb-2 px-2">
-          {/* 类名与其他卡片的标题完全一致，且加 px-2 实现左对齐 */}
           <div className="text-sm font-medium text-oai-gray-500 dark:text-oai-gray-300 uppercase tracking-wide px-2">
             {copy("dashboard.device_card.title")}
           </div>
@@ -88,7 +87,7 @@ export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectD
 
   return (
     <Card bodyClassName="!px-3 !py-3.5">
-      {/* 标题栏类名与其他卡片标题完全一致，加 px-2 实现左对齐 */}
+      {/* Header styled to match the other cards' titles. */}
       <div className="flex items-center justify-between gap-2 mb-2 px-2">
         <div className="text-sm font-medium text-oai-gray-500 dark:text-oai-gray-300 uppercase tracking-wide">
           {copy("dashboard.device_card.title")}
@@ -104,7 +103,6 @@ export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectD
         )}
       </div>
 
-      {/* 设备项纵向间距调紧为 space-y-[2px]，提升极致精致感 */}
       <div className="space-y-[2px]">
         {ranked.map((d) => {
           const tokens = Number(d.total_tokens) || 0;
@@ -119,7 +117,7 @@ export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectD
               ? "bg-oai-gray-300 dark:bg-oai-gray-600"
               : "bg-oai-brand/50";
 
-          // UX 深度思考：未选中项整体降低透明度（失焦虚化），选中项 100% 实体高亮
+          // While filtering, fade unselected rows so the active device stands out.
           const itemOpacity = anySelected && !isSelected
             ? "opacity-40 hover:opacity-80"
             : "opacity-100";
@@ -127,9 +125,9 @@ export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectD
           return (
             <div key={d.id} className="group relative">
               {isEditing ? (
-                /* 2. 编辑状态（对齐 padding，防抖动极紧凑布局） */
+                /* Edit state: same padding as the row to avoid layout shift. */
                 <div className="w-full rounded-md px-2 py-1.5 bg-oai-gray-50/50 dark:bg-oai-gray-900/40">
-                  {/* 第一行：左侧输入框，右侧操作按钮 */}
+                  {/* Row 1: name input (left), save / cancel (right). */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <PlatformIcon platform={d.platform} className="h-3.5 w-3.5 shrink-0 text-oai-gray-500 dark:text-oai-gray-400" />
@@ -169,7 +167,7 @@ export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectD
                     </div>
                   </div>
 
-                  {/* 第二行：置灰的进度条与用量（保持物理高度与拉满） */}
+                  {/* Row 2: dimmed bar — keeps the row height stable while editing. */}
                   <div className="mt-1.5 h-[2px] bg-oai-gray-100 dark:bg-oai-gray-800 rounded-full overflow-hidden opacity-40 select-none">
                     <div
                       className={`h-full rounded-full transition-[width,background-color] duration-700 ease-out ${fillClass}`}
@@ -178,33 +176,36 @@ export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectD
                   </div>
                 </div>
               ) : (
-                /* 3. 正常/展示状态（无绿字绿底，仅通过灰色暗底与失焦虚化对比聚焦，极致素雅） */
-                <button
-                  type="button"
-                  aria-pressed={isSelected}
-                  aria-label={`${copy("dashboard.device_filter.aria")}: ${name}`}
-                  onClick={() => onSelectDevice?.(isSelected ? "" : d.id)}
-                  className={`w-full text-left rounded-md px-2 py-1.5 transition-all duration-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-oai-brand/50 ${itemOpacity} ${
-                    isSelected
-                      ? "bg-oai-gray-100/70 dark:bg-oai-gray-800/80 text-oai-black dark:text-oai-white"
-                      : "bg-transparent hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800/40 text-oai-black dark:text-oai-white"
-                  }`}
-                >
-                  {/* 第一行：左侧名称，右侧用量与 Pencil 渐隐融合 */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <PlatformIcon
-                        platform={d.platform}
-                        className="h-3.5 w-3.5 shrink-0 text-oai-gray-500 dark:text-oai-gray-400"
-                      />
-                      <span className="block truncate text-[13px] font-medium text-oai-black dark:text-oai-white" title={name}>
-                        {name}
-                      </span>
-                    </div>
-
-                    {/* 右侧微交互融合区：用量主数字保持标准黑白，百分比数字和点号调淡 (text-oai-gray-400/500) 区分主次 */}
-                    <div className="relative shrink-0 flex items-center justify-end w-28 h-4">
-                      <span className="text-[13px] font-semibold tabular-nums text-oai-black dark:text-oai-white group-hover:opacity-0 transition-opacity duration-150">
+                /* Display state: the whole row toggles the filter; rename is a sibling
+                   overlay (a button must not nest inside a button — invalid DOM). */
+                <>
+                  <button
+                    type="button"
+                    aria-pressed={isSelected}
+                    aria-label={`${copy("dashboard.device_filter.aria")}: ${name}`}
+                    onClick={() => onSelectDevice?.(isSelected ? "" : d.id)}
+                    className={`w-full text-left rounded-md px-2 py-1.5 transition-all duration-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-oai-brand/50 ${itemOpacity} ${
+                      isSelected
+                        ? "bg-oai-gray-100/70 dark:bg-oai-gray-800/80 text-oai-black dark:text-oai-white"
+                        : "bg-transparent hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800/40 text-oai-black dark:text-oai-white"
+                    }`}
+                  >
+                    {/* Row 1: name (left); usage (right, fades on hover to reveal the rename pencil). */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <PlatformIcon
+                          platform={d.platform}
+                          className="h-3.5 w-3.5 shrink-0 text-oai-gray-500 dark:text-oai-gray-400"
+                        />
+                        <span className="block truncate text-[13px] font-medium text-oai-black dark:text-oai-white" title={name}>
+                          {name}
+                        </span>
+                      </div>
+                      <span
+                        className={`shrink-0 text-[13px] font-semibold tabular-nums text-oai-black dark:text-oai-white transition-opacity duration-150 ${
+                          canRename ? "group-hover:opacity-0" : ""
+                        }`}
+                      >
                         {formatCompactNumber(tokens)}
                         <span className="text-oai-gray-400 dark:text-oai-gray-500 font-normal">
                           {DOT_DIVIDER}
@@ -212,33 +213,30 @@ export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectD
                           {PCT_SIGN}
                         </span>
                       </span>
-                      {canRename && (
-                        <button
-                          type="button"
-                          aria-label={copy("dashboard.device_card.rename_aria")}
-                          onClick={(e) => {
-                            e.stopPropagation(); // 阻止事件冒泡触发选中过滤
-                            beginEdit(d);
-                          }}
-                          className="absolute inset-0 flex items-center justify-end text-oai-gray-400 opacity-0 group-hover:opacity-100 hover:text-oai-brand focus:opacity-100 focus:outline-none transition-opacity duration-150"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                      )}
                     </div>
-                  </div>
 
-                  {/* 第二行：细进度条（横向拉满） */}
-                  <div className="mt-1.5 h-[2px] bg-oai-gray-100 dark:bg-oai-gray-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-[width,background-color] duration-700 ease-out ${fillClass}`}
-                      style={{ width: `${percent}%` }}
-                    />
-                  </div>
-                </button>
+                    {/* Row 2: usage bar. */}
+                    <div className="mt-1.5 h-[2px] bg-oai-gray-100 dark:bg-oai-gray-800 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-[width,background-color] duration-700 ease-out ${fillClass}`}
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                  </button>
+                  {canRename && (
+                    <button
+                      type="button"
+                      aria-label={copy("dashboard.device_card.rename_aria")}
+                      onClick={() => beginEdit(d)}
+                      className="absolute right-2 top-1.5 flex h-4 items-center text-oai-gray-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-oai-brand focus:outline-none transition-opacity duration-150"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                  )}
+                </>
               )}
 
-              {/* 错误提示 */}
+              {/* Rename error. */}
               {errorId === d.id && (
                 <div className="px-2 mt-1 text-xs text-red-500 font-medium">
                   {copy("dashboard.device_card.rename_error")}
