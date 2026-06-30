@@ -481,6 +481,38 @@ async function handleLocalApi(req, res, url) {
     return true;
   }
 
+  // 处理 tokentracker-outcomes
+  if (pathname === "/functions/tokentracker-outcomes") {
+    const from = url.searchParams.get("from") || "";
+    const to = url.searchParams.get("to") || "";
+    try {
+      const outcomesEnginePath = path.resolve(REPO_ROOT, "src/lib/outcomes-engine");
+      const {
+        readOutcomesData,
+        resolveOutcomesPath,
+        computeQualityPerDollar,
+      } = __viteRequire(outcomesEnginePath);
+
+      const outcomes = readOutcomesData(resolveOutcomesPath());
+      if (!outcomes.length) {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ available: false, from, to, by_model: [], by_tool: [], totals: null }));
+        return true;
+      }
+
+      const queueRows = readQueueData();
+      const result = computeQualityPerDollar(queueRows, outcomes, { from, to });
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ from, to, scope: null, excluded_sources: [], ...result }));
+    } catch (e) {
+      console.warn("[vite-mock] tokentracker-outcomes failed:", e?.message || e);
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: e?.message || "Unknown error" }));
+    }
+    return true;
+  }
+
   // 处理 usage-summary
   if (pathname === "/functions/tokentracker-usage-summary") {
     const from = url.searchParams.get("from") || "";

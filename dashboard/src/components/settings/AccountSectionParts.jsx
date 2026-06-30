@@ -2,7 +2,8 @@ import React from "react";
 import { Pencil } from "lucide-react";
 import { useLoginModal } from "../../contexts/LoginModalContext.jsx";
 import { copy } from "../../lib/copy";
-import { SectionCard, ToggleSwitch } from "./Controls.jsx";
+import { SectionCard, ToggleSwitch, SettingsRow } from "./Controls.jsx";
+import { useQualityPerDollarPref } from "../../hooks/use-quality-per-dollar-pref.js";
 
 function InlineEditorActions({ disabled, onCancel, onSave, saveLabel = copy("settings.account.save") }) {
   return (
@@ -212,34 +213,58 @@ function GithubProfileField({ github }) {
     startEditingGithub,
   } = github;
 
+  const { enabled: qpdEnabled, toggle: toggleQpd } = useQualityPerDollarPref();
+
   return (
-    <SettingsField
-      label={copy("settings.account.githubUrl")}
-      editing={editingGithub}
-      hint={githubUrl || copy("settings.account.githubUrlHint")}
-      editor={
-        <EditGithubControls
-          githubError={githubError}
-          githubInput={githubInput}
-          handleSaveGithub={handleSaveGithub}
-          profileSaving={profileSaving}
-          setEditingGithub={setEditingGithub}
-          setGithubError={setGithubError}
-          setGithubInput={setGithubInput}
-        />
-      }
-      actions={
-        <div className="flex shrink-0 items-center gap-2">
-          <EditButton label={copy("settings.account.edit")} onClick={startEditingGithub} />
-          <ToggleSwitch
-            checked={showGithubOn}
-            onChange={handleShowGithubToggle}
-            disabled={profileLoading || profileSaving}
-            ariaLabel={copy("settings.account.githubUrl")}
+    <>
+      <SettingsField
+        label={copy("settings.account.githubUrl")}
+        editing={editingGithub}
+        hint={githubUrl || copy("settings.account.githubUrlHint")}
+        editor={
+          <EditGithubControls
+            githubError={githubError}
+            githubInput={githubInput}
+            handleSaveGithub={handleSaveGithub}
+            profileSaving={profileSaving}
+            setEditingGithub={setEditingGithub}
+            setGithubError={setGithubError}
+            setGithubInput={setGithubInput}
           />
-        </div>
-      }
-    />
+        }
+        actions={
+          <div className="flex shrink-0 items-center gap-2">
+            <EditButton label={copy("settings.account.edit")} onClick={startEditingGithub} />
+            <ToggleSwitch
+              checked={showGithubOn}
+              onChange={handleShowGithubToggle}
+              disabled={profileLoading || profileSaving}
+              ariaLabel={copy("settings.account.githubUrl")}
+            />
+          </div>
+        }
+      />
+      {githubUrl && (
+        <SettingsRow
+          label={
+            <div className="flex items-center gap-1.5">
+              <span>{copy("settings.labs.qpd.label")}</span>
+              <span className="px-1.5 py-0.5 text-[8px] font-semibold tracking-wider text-oai-gray-500 bg-oai-gray-100 dark:text-oai-gray-400 dark:bg-oai-gray-800/80 rounded uppercase scale-90 origin-left">
+                Beta
+              </span>
+            </div>
+          }
+          hint={copy("settings.labs.qpd.hint")}
+          control={
+            <ToggleSwitch
+              checked={qpdEnabled}
+              onChange={toggleQpd}
+              ariaLabel={copy("settings.labs.qpd.aria")}
+            />
+          }
+        />
+      )}
+    </>
   );
 }
 
