@@ -175,7 +175,7 @@
   "limits.label.antigravity_gemini_weekly": "Gm 7d",
   "limits.label.antigravity_gemini_5h": "Gm 5h",
   "qpd.card.title": "研发性价比与交付成本",
-  "qpd.card.badge": "实验室",
+  "qpd.card.badge": "Beta",
   "qpd.card.subtitle": "基于已合并的 PR 历史，估算不同模型的平均交付成本。",
   "qpd.card.updating": "更新中…",
   "qpd.card.best_value": "最省钱",
