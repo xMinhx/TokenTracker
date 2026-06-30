@@ -969,64 +969,65 @@ async function cmdSync(argv) {
     }
 
     if (!opts.auto) {
-      const totalParsed =
-        parseResult.filesProcessed +
-        openclawResult.filesProcessed +
-        claudeResult.filesProcessed +
-        geminiResult.filesProcessed +
-        antigravityResult.filesProcessed +
-        opencodeResult.filesProcessed +
-        cursorResult.recordsProcessed +
-        kiroResult.recordsProcessed +
-        kiroCliResult.recordsProcessed +
-        hermesResult.recordsProcessed +
-        kimiResult.recordsProcessed +
-        codebuddyResult.recordsProcessed +
-        ompResult.recordsProcessed +
-        piResult.recordsProcessed +
-        craftResult.recordsProcessed +
-        grokResult.recordsProcessed +
-        copilotResult.recordsProcessed +
-        kiloResult.messagesProcessed +
-        kilocodeResult.recordsProcessed +
-        roocodeResult.recordsProcessed +
-        zedResult.recordsProcessed +
-        gooseResult.recordsProcessed +
-        droidResult.recordsProcessed;
+      const sum = (r, f) => r + f;
+      const totalFiles =
+        [parseResult, openclawResult, claudeResult, geminiResult, antigravityResult, opencodeResult]
+          .map(r => r.filesProcessed).reduce(sum, 0) +
+        [kiloResult].map(r => r.messagesProcessed).reduce(sum, 0) +
+        [cursorResult, kiroResult, kiroCliResult, hermesResult, kimiResult, codebuddyResult,
+          ompResult, piResult, craftResult, grokResult, copilotResult,
+          kilocodeResult, roocodeResult, zedResult, gooseResult, droidResult]
+          .map(r => r.recordsProcessed).reduce(sum, 0);
       const totalBuckets =
-        parseResult.bucketsQueued +
-        openclawResult.bucketsQueued +
-        claudeResult.bucketsQueued +
-        geminiResult.bucketsQueued +
-        antigravityResult.bucketsQueued +
-        opencodeResult.bucketsQueued +
-        cursorResult.bucketsQueued +
-        kiroResult.bucketsQueued +
-        kiroCliResult.bucketsQueued +
-        hermesResult.bucketsQueued +
-        kimiResult.bucketsQueued +
-        codebuddyResult.bucketsQueued +
-        ompResult.bucketsQueued +
-        piResult.bucketsQueued +
-        craftResult.bucketsQueued +
-        grokResult.bucketsQueued +
-        copilotResult.bucketsQueued +
-        kiloResult.bucketsQueued +
-        kilocodeResult.bucketsQueued +
-        roocodeResult.bucketsQueued +
-        zedResult.bucketsQueued +
-        gooseResult.bucketsQueued +
-        droidResult.bucketsQueued;
+        [parseResult, openclawResult, claudeResult, geminiResult, antigravityResult,
+          opencodeResult, cursorResult, kiroResult, kiroCliResult, hermesResult,
+          kimiResult, codebuddyResult, ompResult, piResult, craftResult, grokResult,
+          copilotResult, kiloResult, kilocodeResult, roocodeResult, zedResult, gooseResult, droidResult]
+          .map(r => r.bucketsQueued).reduce(sum, 0);
+
+      const providers = [
+        { label: "Rollout",     n: parseResult.filesProcessed,   buckets: parseResult.bucketsQueued, unit: "files" },
+        { label: "OpenClaw",    n: openclawResult.filesProcessed, buckets: openclawResult.bucketsQueued, unit: "files" },
+        { label: "Claude",      n: claudeResult.filesProcessed,  buckets: claudeResult.bucketsQueued, unit: "files" },
+        { label: "Gemini",      n: geminiResult.filesProcessed,  buckets: geminiResult.bucketsQueued, unit: "files" },
+        { label: "Antigravity", n: antigravityResult.filesProcessed, buckets: antigravityResult.bucketsQueued, unit: "files" },
+        { label: "OpenCode",    n: opencodeResult.filesProcessed, buckets: opencodeResult.bucketsQueued, unit: "files" },
+        { label: "OpenCode SQL", n: opencodeDbResult.messagesProcessed, buckets: opencodeDbResult.bucketsQueued, unit: "msgs" },
+        { label: "Kilo SQL",    n: kiloResult.messagesProcessed, buckets: kiloResult.bucketsQueued, unit: "msgs" },
+        { label: "Kilo Code",   n: kilocodeResult.recordsProcessed, buckets: kilocodeResult.bucketsQueued, unit: "recs" },
+        { label: "Goose",       n: gooseResult.recordsProcessed, buckets: gooseResult.bucketsQueued, unit: "recs" },
+        { label: "Droid",       n: droidResult.recordsProcessed, buckets: droidResult.bucketsQueued, unit: "recs" },
+        { label: "Zed",         n: zedResult.recordsProcessed,   buckets: zedResult.bucketsQueued, unit: "recs" },
+        { label: "Roo Code",    n: roocodeResult.recordsProcessed, buckets: roocodeResult.bucketsQueued, unit: "recs" },
+        { label: "Cursor",      n: cursorResult.recordsProcessed, buckets: cursorResult.bucketsQueued, unit: "recs" },
+        { label: "Kiro",        n: kiroResult.recordsProcessed,  buckets: kiroResult.bucketsQueued, unit: "recs" },
+        { label: "Hermes",      n: hermesResult.recordsProcessed, buckets: hermesResult.bucketsQueued, unit: "sess" },
+        { label: "Kiro CLI",    n: kiroCliResult.recordsProcessed, buckets: kiroCliResult.bucketsQueued, unit: "recs" },
+        { label: "Kimi",        n: kimiResult.recordsProcessed,  buckets: kimiResult.bucketsQueued, unit: "recs" },
+        { label: "CodeBuddy",   n: codebuddyResult.recordsProcessed, buckets: codebuddyResult.bucketsQueued, unit: "recs" },
+        { label: "OMP",         n: ompResult.recordsProcessed,   buckets: ompResult.bucketsQueued, unit: "recs" },
+        { label: "Pi",          n: piResult.recordsProcessed,    buckets: piResult.bucketsQueued, unit: "recs" },
+        { label: "Craft",       n: craftResult.recordsProcessed, buckets: craftResult.bucketsQueued, unit: "recs" },
+        { label: "Grok",        n: grokResult.recordsProcessed,  buckets: grokResult.bucketsQueued, unit: "recs" },
+        { label: "Copilot",     n: copilotResult.recordsProcessed, buckets: copilotResult.bucketsQueued, unit: "recs" },
+      ].filter(p => p.n > 0 || p.buckets > 0);
+
+      const padLabel = Math.max(...providers.map(p => p.label.length), 0) + 1;
+      const rows = providers.map(p =>
+        `  ${p.label.padEnd(padLabel)} ${p.n} ${p.unit}, ${p.buckets} buckets`,
+      );
+
       process.stdout.write(
         [
           "Sync finished:",
-          `- Parsed files: ${totalParsed}`,
-          `- New 30-min buckets queued: ${totalBuckets}`,
+          ...rows,
+          `  ${"─".repeat(Math.max(padLabel + 2, 12))}`,
+          `  Total: ${totalFiles} files/records, ${totalBuckets} buckets queued`,
           runtime.deviceToken
-            ? `- Uploaded: ${uploadResult.inserted} inserted, ${uploadResult.skipped} skipped`
-            : "- Uploaded: skipped (no device token)",
+            ? `  Uploaded: ${uploadResult.inserted} inserted, ${uploadResult.skipped} skipped`
+            : "  Uploaded: skipped (no device token)",
           runtime.deviceToken && pendingBytes > 0 && !opts.drain
-            ? `- Remaining: ${formatBytes(pendingBytes)} pending (run sync again, or use --drain)`
+            ? `  Remaining: ${formatBytes(pendingBytes)} pending (run sync again, or use --drain)`
             : null,
           "",
         ]
