@@ -2477,10 +2477,10 @@ async function fetchUsageLimitsUncached({
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     withProviderTimeout(fetchZcodeLimits({ home, env, fetchImpl: providerFetch }), "ZCode", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
-    // OpenCode Go scrapes the workspace dashboard (no public REST API yet,
-    // tracked at anomalyco/opencode#16017). Auth is via two env vars, see
-    // src/lib/opencode-go-limits.js for the exact endpoint + cookie shape.
-    withProviderTimeout(fetchOpencodeGoLimits({ env, fetchImpl: providerFetch }), "OpenCode Go", providerTimeoutMs)
+    // OpenCode Go: local opencode.db cost-vs-dollar-cap estimate by default
+    // (auth-free, zero-config), upgraded to the exact server-side scrape when an
+    // OPENCODE_GO_AUTH_COOKIE is set. See src/lib/opencode-go-limits.js.
+    withProviderTimeout(fetchOpencodeGoLimits({ home, env, fetchImpl: providerFetch }), "OpenCode Go", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
   ]);
 

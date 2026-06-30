@@ -1,20 +1,36 @@
 const crypto = require("node:crypto");
+const fssync = require("node:fs");
+const path = require("node:path");
+const { readSqliteJsonRowsAsync } = require("./sqlite-reader");
 
 // OpenCode Go usage limits.
 //
-// Scrapes the OpenCode Go workspace dashboard
-// (https://opencode.ai/workspace/<id>/go) for rolling (5h) / weekly / monthly
-// usage. The opencode web console has no public REST API for quota today
-// (tracked at anomalyco/opencode#16017, anomalyco/opencode#16513), so we
-// read the same data the React app uses by parsing the SSR hydration output
-// (SolidStart `queryLiteSubscription` serializes the result as
-// `rollingUsage:$R[N]={...usagePercent:N...resetInSec:N...}`) with a
-// `data-slot="usage-item"` HTML fallback.
+// Two data sources, in priority order:
 //
-// Approach ported from slkiser/opencode-quota PR #41 (MIT, Apr 12 2026,
-// 430 tests passing) — that project independently arrived at the same
-// scrape with the same env-var names. The cookie is sent verbatim as
-// `Cookie: auth=<OPENCODE_GO_AUTH_COOKIE>` per that reference.
+//   1. Local opencode.db (auth-free, the default / zero-config path). The
+//      `opencode` CLI records every Go turn's USD `cost` in its SQLite
+//      `message` table. OpenCode Go's limits are themselves dollar caps
+//      ($12/5h, $30/week, $60/month — https://opencode.ai/docs/go), so summing
+//      local cost per window ÷ the dollar cap is dimensionally exact, not a
+//      heuristic. Its only blind spot is usage that did NOT go through the
+//      local CLI (e.g. the web console, or another machine). This is what
+//      token-monitor (Javis603/token-monitor) falls back to, and the only
+//      source that survives opencode's OAuth changes (see #225).
+//
+//   2. Web scrape of the workspace dashboard
+//      (https://opencode.ai/workspace/<id>/go) for the server's EXACT
+//      rolling (5h) / weekly / monthly usagePercent. Used only when a cookie
+//      is configured AND the scrape succeeds — it carries the precise
+//      server-side number but is fragile: opencode moved auth to OAuth
+//      (auth.opencode.ai), so a bare `auth` cookie now often 302s to the login
+//      page (the #225 saga). The cookie is sent verbatim as
+//      `Cookie: auth=<OPENCODE_GO_AUTH_COOKIE>` per slkiser/opencode-quota#41.
+//
+// The opencode web console has no public REST API for quota
+// (anomalyco/opencode#16017, #16513) and the CLI's `sk-` API key authenticates
+// only the inference gateway (/zen/go/v1), not the usage windows — so the local
+// DB is the only accurate auth-free option. The returned shape is identical for
+// both sources; `source` is `'local'` or `'web'`.
 
 const SCRAPED_NUMBER_PATTERN = "([0-9]+(?:\\.[0-9]+)?)";
 
@@ -271,15 +287,195 @@ function looksSignedOut(text) {
     || l.includes("not associated with an account") || l.includes('actor of type "public"');
 }
 
-async function fetchOpencodeGoLimits({
-  env = process.env,
-  fetchImpl = fetch,
-  nowMs = Date.now(),
-  timeoutMs = DEFAULT_SCRAPE_TIMEOUT_MS,
-} = {}) {
-  const cfg = readConfig(env);
-  if (!cfg) return { configured: false };
+// --- Local opencode.db cost aggregation (auth-free source) ------------------
 
+const SESSION_MS = 5 * 60 * 60 * 1000;
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+// OpenCode Go's official dollar caps — https://opencode.ai/docs/go
+// ($12 per 5h, $30 per week, $60 per month). The limits are not stored in the
+// local DB, so they are hardcoded; env-overridable in case opencode changes
+// them (TOKENTRACKER_OPENCODE_GO_LIMITS="12,30,60").
+const DEFAULT_GO_LIMITS = { session: 12, weekly: 30, monthly: 60 };
+
+function goDollarLimits(env = process.env) {
+  const raw = String((env && env.TOKENTRACKER_OPENCODE_GO_LIMITS) || "").trim();
+  if (!raw) return { ...DEFAULT_GO_LIMITS };
+  const parts = raw.split(",").map((s) => Number(s.trim()));
+  if (parts.length === 3 && parts.every((n) => Number.isFinite(n) && n > 0)) {
+    return { session: parts[0], weekly: parts[1], monthly: parts[2] };
+  }
+  return { ...DEFAULT_GO_LIMITS };
+}
+
+// Mirror sync.js's opencode home resolution (OPENCODE_HOME / XDG_DATA_HOME /
+// <home>/.local/share/opencode) so we read the SAME DB the parser reads. The
+// user home comes from the `home` arg getUsageLimits already threads to every
+// other home-based provider (cf. resolveZcodeHome). NOTE: we deliberately do
+// NOT fall back to os.homedir() — only an explicit `home`/env HOME — so a
+// synthetic test env (no home, no HOME) discovers nothing and the web-scrape
+// tests stay isolated from the developer's real opencode.db.
+function resolveOpencodeDataDir({ home, env = process.env } = {}) {
+  if (env.OPENCODE_HOME) return env.OPENCODE_HOME;
+  if (env.XDG_DATA_HOME) return path.join(env.XDG_DATA_HOME, "opencode");
+  const base = home || env.HOME || env.USERPROFILE;
+  if (!base) return null;
+  return path.join(base, ".local", "share", "opencode");
+}
+
+// Matches `opencode.db` or `opencode-<channel>.db`; excludes WAL/SHM side-files.
+function isOpencodeDbFilename(name) {
+  if (!name.endsWith(".db")) return false;
+  const stem = name.slice(0, -3);
+  if (stem === "opencode") return true;
+  if (!stem.startsWith("opencode-")) return false;
+  const channel = stem.slice("opencode-".length);
+  return channel.length > 0 && /^[A-Za-z0-9._-]+$/.test(channel);
+}
+
+function discoverOpencodeDbPaths({ home, env = process.env } = {}) {
+  const override = String((env && env.OPENCODE_DB) || "").trim();
+  if (override) {
+    try {
+      if (fssync.statSync(override).isFile()) return [override];
+    } catch (_e) {
+      /* fall through to directory scan */
+    }
+  }
+  const dir = resolveOpencodeDataDir({ home, env });
+  if (!dir) return [];
+  let entries;
+  try {
+    entries = fssync.readdirSync(dir);
+  } catch (_e) {
+    return [];
+  }
+  return entries.filter(isOpencodeDbFilename).sort().map((n) => path.join(dir, n));
+}
+
+function weekStartMs(nowMs) {
+  const d = new Date(nowMs);
+  const day = d.getUTCDay(); // 0=Sun..6=Sat
+  const sinceMonday = day === 0 ? 6 : day - 1;
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - sinceMonday);
+}
+
+// Calendar-month bounds (UTC). OpenCode Go's true monthly reset is the
+// subscription anniversary, which the local DB does not record; the calendar
+// month is a stable, defensible approximation for the auth-free estimate.
+function monthBoundsMs(nowMs) {
+  const now = new Date(nowMs);
+  return {
+    startMs: Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+    endMs: Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+  };
+}
+
+// Percentage clamp for the local estimate. Unlike clampPercent() (which scales
+// a 0–1 fraction from the web payload), this treats its input as an already-
+// computed percentage and must NOT rescale values below 1 (e.g. 0.5%).
+function clampLocalPercent(n) {
+  if (!Number.isFinite(n)) return null;
+  if (n <= 0) return 0;
+  if (n >= 100) return 100;
+  return n;
+}
+
+function buildLocalWindow({ used, limit, resetMs }) {
+  if (!(limit > 0)) return null;
+  const pct = clampLocalPercent((Number(used) / limit) * 100);
+  if (pct === null) return null;
+  return { used_percent: pct, reset_at: new Date(resetMs).toISOString() };
+}
+
+// One full-table aggregate (the message table has no index on the JSON fields,
+// so we sum in SQLite and return a single row rather than streaming every
+// opencode-go turn into JS — keeps the limits poll cheap, cf. the spawnSync
+// freeze lesson).
+function buildGoAggregateSql({ sessionStart, weekStart, weekEnd, monthStart, monthEnd }) {
+  return (
+    "SELECT " +
+    `COALESCE(SUM(CASE WHEN createdMs >= ${sessionStart} THEN cost ELSE 0 END), 0) AS sessionCost, ` +
+    `MIN(CASE WHEN createdMs >= ${sessionStart} THEN createdMs END) AS sessionOldest, ` +
+    `COALESCE(SUM(CASE WHEN createdMs >= ${weekStart} AND createdMs < ${weekEnd} THEN cost ELSE 0 END), 0) AS weeklyCost, ` +
+    `COALESCE(SUM(CASE WHEN createdMs >= ${monthStart} AND createdMs < ${monthEnd} THEN cost ELSE 0 END), 0) AS monthlyCost, ` +
+    "COUNT(*) AS rowCount " +
+    "FROM (" +
+    "SELECT CAST(COALESCE(json_extract(data,'$.time.created'), time_created) AS INTEGER) AS createdMs, " +
+    "CAST(json_extract(data,'$.cost') AS REAL) AS cost " +
+    "FROM message " +
+    "WHERE json_valid(data) " +
+    "AND json_extract(data,'$.providerID') = 'opencode-go' " +
+    "AND json_extract(data,'$.role') = 'assistant' " +
+    "AND json_type(data,'$.cost') IN ('integer','real')" +
+    ")"
+  );
+}
+
+// Returns { source:'local', primary/secondary/tertiary_window } or null when no
+// opencode.db / no opencode-go rows are found.
+async function collectOpencodeGoLocal({ home, env = process.env, nowMs = Date.now(), sqliteOptions = {} } = {}) {
+  const paths = discoverOpencodeDbPaths({ home, env });
+  if (paths.length === 0) return null;
+
+  const sessionStart = Math.floor(nowMs - SESSION_MS);
+  const weekStart = weekStartMs(nowMs);
+  const weekEnd = weekStart + WEEK_MS;
+  const { startMs: monthStart, endMs: monthEnd } = monthBoundsMs(nowMs);
+  const sql = buildGoAggregateSql({ sessionStart, weekStart, weekEnd, monthStart, monthEnd });
+
+  let agg = null;
+  for (const dbPath of paths) {
+    let rows;
+    try {
+      rows = await readSqliteJsonRowsAsync(dbPath, sql, {
+        label: "OpenCode Go",
+        timeout: 5_000,
+        ...sqliteOptions,
+      });
+    } catch (_e) {
+      continue;
+    }
+    const row = rows && rows[0];
+    if (!row) continue;
+    const rowCount = Number(row.rowCount) || 0;
+    if (rowCount <= 0) continue;
+    if (!agg) agg = { sessionCost: 0, weeklyCost: 0, monthlyCost: 0, sessionOldest: null, rowCount: 0 };
+    agg.sessionCost += Number(row.sessionCost) || 0;
+    agg.weeklyCost += Number(row.weeklyCost) || 0;
+    agg.monthlyCost += Number(row.monthlyCost) || 0;
+    agg.rowCount += rowCount;
+    const oldest = row.sessionOldest == null ? null : Number(row.sessionOldest);
+    if (oldest != null && Number.isFinite(oldest)) {
+      agg.sessionOldest = agg.sessionOldest == null ? oldest : Math.min(agg.sessionOldest, oldest);
+    }
+  }
+  if (!agg || agg.rowCount <= 0) return null;
+
+  const limits = goDollarLimits(env);
+  const sessionReset = (agg.sessionOldest != null ? agg.sessionOldest : nowMs) + SESSION_MS;
+  return {
+    source: "local",
+    primary_window: buildLocalWindow({ used: agg.sessionCost, limit: limits.session, resetMs: sessionReset }),
+    secondary_window: buildLocalWindow({ used: agg.weeklyCost, limit: limits.weekly, resetMs: weekEnd }),
+    tertiary_window: buildLocalWindow({ used: agg.monthlyCost, limit: limits.monthly, resetMs: monthEnd }),
+  };
+}
+
+function localGoResult(local) {
+  return {
+    configured: true,
+    error: null,
+    source: "local",
+    // No `plan_label` — the brand name "OpenCode Go" is the row title.
+    primary_window: local.primary_window || null,
+    secondary_window: local.secondary_window || null,
+    tertiary_window: local.tertiary_window || null,
+  };
+}
+
+// --- Web scrape (exact server-side usage, cookie-gated) ---------------------
+
+async function scrapeOpencodeGoWeb({ cfg, fetchImpl, nowMs, timeoutMs }) {
   let workspaceId = cfg.workspaceId;
   if (!workspaceId) {
     try {
@@ -349,6 +545,34 @@ async function fetchOpencodeGoLimits({
   };
 }
 
+async function fetchOpencodeGoLimits({
+  home,
+  env = process.env,
+  fetchImpl = fetch,
+  nowMs = Date.now(),
+  timeoutMs = DEFAULT_SCRAPE_TIMEOUT_MS,
+  sqliteOptions = {},
+} = {}) {
+  const cfg = readConfig(env);
+
+  // Cookie configured → prefer the exact server-side scrape; fall back to the
+  // local DB estimate when the scrape can't authenticate/parse (the #225 case).
+  if (cfg) {
+    const web = await scrapeOpencodeGoWeb({ cfg, fetchImpl, nowMs, timeoutMs });
+    if (web && !web.error && (web.primary_window || web.secondary_window || web.tertiary_window)) {
+      return { ...web, source: "web" };
+    }
+    const local = await collectOpencodeGoLocal({ home, env, nowMs, sqliteOptions });
+    if (local) return localGoResult(local);
+    return web || { configured: true, error: "OpenCode Go unavailable" };
+  }
+
+  // No cookie → the local opencode.db is the zero-config source.
+  const local = await collectOpencodeGoLocal({ home, env, nowMs, sqliteOptions });
+  if (local) return localGoResult(local);
+  return { configured: false };
+}
+
 module.exports = {
   fetchOpencodeGoLimits,
   readConfig,
@@ -360,4 +584,13 @@ module.exports = {
   resolveWorkspaceId,
   parseWorkspaceIds,
   looksSignedOut,
+  // Local opencode.db cost-based estimate (auth-free source).
+  collectOpencodeGoLocal,
+  discoverOpencodeDbPaths,
+  resolveOpencodeDataDir,
+  isOpencodeDbFilename,
+  goDollarLimits,
+  weekStartMs,
+  monthBoundsMs,
+  buildLocalWindow,
 };

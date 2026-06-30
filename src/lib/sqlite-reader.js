@@ -1,5 +1,6 @@
 const cp = require("node:child_process");
 const fssync = require("node:fs");
+const { promisify } = require("node:util");
 
 const warnedSqliteReadFailures = new Set();
 
@@ -116,6 +117,63 @@ function readSqliteJsonRows(dbPath, sql, options = {}) {
   return [];
 }
 
+async function readSqliteRowsWithCliAsync(dbPath, sql, { execFile, timeout, maxBuffer }) {
+  const { stdout } = await execFile("sqlite3", ["-json", dbPath, sql], {
+    encoding: "utf8",
+    maxBuffer,
+    timeout,
+  });
+  if (!stdout || !stdout.trim()) return [];
+  const rows = JSON.parse(stdout);
+  return Array.isArray(rows) ? rows : [];
+}
+
+// Async twin of readSqliteJsonRows for hot paths that must not block the event
+// loop (e.g. the usage-limits poll — see the "limits 路径 spawnSync 冻结全端点"
+// lesson). The CLI path runs via async execFile; the node:sqlite fallback is
+// synchronous (no async API exists), but it only runs when the sqlite3 CLI is
+// absent — uncommon on macOS/Linux, where the async path keeps the loop free.
+async function readSqliteJsonRowsAsync(dbPath, sql, options = {}) {
+  if (!dbPath || !sql) return [];
+  try {
+    if (!fssync.existsSync(dbPath)) return [];
+  } catch (_e) {
+    return [];
+  }
+  const execFile = options.execFile || promisify(cp.execFile);
+  const requireFn = options.requireFn || require;
+  const env = options.env || process.env;
+  const timeout = Number.isFinite(options.timeout) ? options.timeout : 30_000;
+  const maxBuffer = Number.isFinite(options.maxBuffer) ? options.maxBuffer : 50 * 1024 * 1024;
+  const label = options.label || "local";
+
+  let cliError = null;
+  try {
+    return await readSqliteRowsWithCliAsync(dbPath, sql, { execFile, timeout, maxBuffer });
+  } catch (err) {
+    cliError = err;
+  }
+
+  let nodeSqliteError = null;
+  try {
+    return readSqliteRowsWithNode(dbPath, sql, { requireFn });
+  } catch (err) {
+    nodeSqliteError = err;
+  }
+
+  if (isSqliteCliUnavailable(cliError) && isNodeSqliteUnavailable(nodeSqliteError)) {
+    warnSqliteUnavailable({
+      dbPath,
+      label,
+      cliError,
+      nodeSqliteError,
+      env,
+      stderr: options.stderr,
+    });
+  }
+  return [];
+}
+
 function readSqliteFirstValue(dbPath, sql, column, options = {}) {
   const rows = readSqliteJsonRows(dbPath, sql, options);
   const row = rows[0];
@@ -131,6 +189,7 @@ function resetSqliteReaderWarningsForTests() {
 
 module.exports = {
   readSqliteJsonRows,
+  readSqliteJsonRowsAsync,
   readSqliteFirstValue,
   resetSqliteReaderWarningsForTests,
 };
