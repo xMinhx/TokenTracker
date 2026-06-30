@@ -33,15 +33,15 @@ function avgCostPerAcc(cost_usd, accepted) {
 function Row({ row }) {
   return (
     <tr className="border-t border-oai-gray-100 dark:border-oai-gray-800/60 hover:bg-oai-gray-50/40 dark:hover:bg-oai-gray-800/10 transition-colors">
-      <td className="py-2.5 pr-2 font-mono text-[11px] text-oai-gray-700 dark:text-oai-gray-300 truncate max-w-[140px]" title={row.key}>
+      <td className="py-2.5 pr-2 font-mono text-[11px] text-oai-gray-700 dark:text-oai-gray-300 truncate max-w-[80px] xs:max-w-[110px] sm:max-w-[140px]" title={row.key}>
         {row.key}
       </td>
-      <td className="py-2.5 px-2 text-right tabular-nums text-oai-gray-600 dark:text-oai-gray-400">{money(row.cost_usd)}</td>
-      <td className="py-2.5 px-2 text-right tabular-nums text-oai-gray-600 dark:text-oai-gray-400">
+      <td className="py-2.5 px-1.5 text-right tabular-nums text-oai-gray-600 dark:text-oai-gray-400">{money(row.cost_usd)}</td>
+      <td className="py-2.5 px-1.5 text-right tabular-nums text-oai-gray-600 dark:text-oai-gray-400">
         {row.accepted}/{row.outcomes}
       </td>
-      <td className="py-2.5 px-2 text-right tabular-nums text-oai-gray-600 dark:text-oai-gray-400">{pct(row.acceptance_rate)}</td>
-      <td className="py-2.5 pl-2 text-right tabular-nums font-semibold text-oai-black dark:text-oai-white">{avgCostPerAcc(row.cost_usd, row.accepted)}</td>
+      <td className="py-2.5 px-1.5 text-right tabular-nums text-oai-gray-600 dark:text-oai-gray-400">{pct(row.acceptance_rate)}</td>
+      <td className="py-2.5 pl-2 pr-2 text-right tabular-nums font-semibold text-oai-black dark:text-oai-white">{avgCostPerAcc(row.cost_usd, row.accepted)}</td>
     </tr>
   );
 }
@@ -72,27 +72,29 @@ export function QualityPerDollarCard({ from, to, deviceId = null }) {
       <div className="mb-2 flex items-center gap-2">
         <h3 className="text-sm font-medium text-oai-black dark:text-oai-white">{copy("qpd.card.title")}</h3>
         <span className="px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-oai-gray-500 bg-oai-gray-100 dark:text-oai-gray-400 dark:bg-oai-gray-800/80 rounded uppercase">
-          Beta
+          {copy("qpd.card.badge")}
         </span>
       </div>
       <p className="mb-3 text-xs text-oai-gray-500 dark:text-oai-gray-400">{subtitle}</p>
 
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-[10px] uppercase tracking-wide text-oai-gray-400 dark:text-oai-gray-500">
-            <th className="pb-1.5 pr-2 text-left font-medium">{copy("qpd.card.col_model")}</th>
-            <th className="pb-1.5 px-2 text-right font-medium">{copy("qpd.card.col_cost")}</th>
-            <th className="pb-1.5 px-2 text-right font-medium">{copy("qpd.card.col_accepted")}</th>
-            <th className="pb-1.5 px-2 text-right font-medium">{copy("qpd.card.col_rate")}</th>
-            <th className="pb-1.5 pl-2 text-right font-medium" title={copy("qpd.card.qpd_tooltip")}>{copy("qpd.card.col_qpd")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {top.map((row) => (
-            <Row key={row.key} row={row} />
-          ))}
-        </tbody>
-      </table>
+      <div className="w-full overflow-x-auto oai-scrollbar">
+        <table className="w-full text-xs min-w-[340px] sm:min-w-0">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wide text-oai-gray-400 dark:text-oai-gray-500">
+              <th className="pb-1.5 pr-2 text-left font-medium">{copy("qpd.card.col_model")}</th>
+              <th className="pb-1.5 px-1.5 text-right font-medium">{copy("qpd.card.col_cost")}</th>
+              <th className="pb-1.5 px-1.5 text-right font-medium">{copy("qpd.card.col_accepted")}</th>
+              <th className="pb-1.5 px-1.5 text-right font-medium">{copy("qpd.card.col_rate")}</th>
+              <th className="pb-1.5 pl-2 pr-2 text-right font-medium" title={copy("qpd.card.qpd_tooltip")}>{copy("qpd.card.col_qpd")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {top.map((row) => (
+              <Row key={row.key} row={row} />
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <div className="mt-3 flex items-center justify-between border-t border-oai-gray-200 dark:border-oai-gray-800 pt-2.5 text-[11px] text-oai-gray-500 dark:text-oai-gray-400">
         <span>
