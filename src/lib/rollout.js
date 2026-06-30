@@ -14,8 +14,22 @@ const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
 const CLAUDE_MEM_OBSERVER_PROJECT_REF =
   "https://local.tokentracker/claude-mem/observer-sessions";
 
-async function listRolloutFiles(sessionsDir) {
+async function listRolloutFiles(sessionsDir, options = {}) {
   const out = [];
+  const dayInventoryCache =
+    options?.dayInventoryCache && typeof options.dayInventoryCache === "object"
+      ? options.dayInventoryCache
+      : null;
+  const stats = options?.stats && typeof options.stats === "object" ? options.stats : null;
+  if (dayInventoryCache) {
+    if (dayInventoryCache.version !== 1) {
+      dayInventoryCache.days = {};
+    }
+    dayInventoryCache.version = 1;
+    if (!dayInventoryCache.days || typeof dayInventoryCache.days !== "object") {
+      dayInventoryCache.days = {};
+    }
+  }
   const years = await safeReadDir(sessionsDir);
   for (const y of years) {
     if (!/^[0-9]{4}$/.test(y.name) || !y.isDirectory()) continue;
@@ -28,18 +42,66 @@ async function listRolloutFiles(sessionsDir) {
       for (const d of days) {
         if (!/^[0-9]{2}$/.test(d.name) || !d.isDirectory()) continue;
         const dayDir = path.join(monthDir, d.name);
-        const files = await safeReadDir(dayDir);
-        for (const f of files) {
-          if (!f.isFile()) continue;
-          if (!f.name.startsWith("rollout-") || !f.name.endsWith(".jsonl")) continue;
-          out.push(path.join(dayDir, f.name));
-        }
+        const files = await listRolloutDayFiles(dayDir, { dayInventoryCache, stats });
+        out.push(...files);
       }
     }
   }
 
   out.sort((a, b) => a.localeCompare(b));
   return out;
+}
+
+async function listRolloutDayFiles(dayDir, { dayInventoryCache, stats } = {}) {
+  const cacheDays = dayInventoryCache?.days;
+  const dayStat = dayInventoryCache ? await fs.stat(dayDir).catch(() => null) : null;
+  const statKey = dayStat && dayStat.isDirectory() ? directoryInventoryStatKey(dayStat) : null;
+  const cached = cacheDays && cacheDays[dayDir];
+  if (
+    statKey &&
+    cached &&
+    typeof cached === "object" &&
+    cached.statKey === statKey &&
+    Array.isArray(cached.files) &&
+    cached.files.every(isRolloutFileName)
+  ) {
+    if (stats) stats.dayInventoryCacheHits = Number(stats.dayInventoryCacheHits || 0) + 1;
+    return cached.files.map((name) => path.join(dayDir, name));
+  }
+
+  if (stats && cached) stats.dayInventoryCacheMisses = Number(stats.dayInventoryCacheMisses || 0) + 1;
+  const entries = await safeReadDir(dayDir);
+  const files = [];
+  for (const f of entries) {
+    if (!f.isFile()) continue;
+    if (!isRolloutFileName(f.name)) continue;
+    files.push(f.name);
+  }
+  files.sort((a, b) => a.localeCompare(b));
+  if (cacheDays && statKey) {
+    cacheDays[dayDir] = {
+      statKey,
+      files,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  return files.map((name) => path.join(dayDir, name));
+}
+
+function isRolloutFileName(name) {
+  if (typeof name !== "string") return false;
+  if (name.includes("/") || name.includes("\\")) return false;
+  if (name !== path.basename(name)) return false;
+  return name.startsWith("rollout-") && name.endsWith(".jsonl");
+}
+
+function directoryInventoryStatKey(st) {
+  return [
+    Number(st.ino || 0),
+    Number(st.size || 0),
+    Number(st.mtimeMs || 0),
+    Number(st.ctimeMs || 0),
+  ].join(":");
 }
 
 // Collect rollout-*.jsonl at ANY depth under dir. listRolloutFiles requires the

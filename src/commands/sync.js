@@ -157,6 +157,43 @@ const DROID_DUP_SESSION_REPAIR_KEY = "droidDupSessionInflationRepair_2026_06";
 // one-time repair purges all source=mimo data from the local queues + cursor
 // state so the next sync (providerID-filtered reader) rebuilds it correctly.
 const MIMO_PROVIDER_REPAIR_KEY = "mimoClaudeMislabelRepair_2026_06";
+const AUTO_SYNC_SOURCE_ALIASES = new Map([
+  ["code", "every-code"],
+  ["everycode", "every-code"],
+  ["kilo", "kilo-cli"],
+  ["kilo-code", "kilocode"],
+  ["kimi_code", "kimi-code"],
+  ["roo-code", "roocode"],
+]);
+const AUTO_SYNC_SOURCES = new Set([
+  "antigravity",
+  "claude",
+  "codebuddy",
+  "codex",
+  "copilot",
+  "craft",
+  "cursor",
+  "droid",
+  "every-code",
+  "gemini",
+  "goose",
+  "grok",
+  "hermes",
+  "kilo-cli",
+  "kilocode",
+  "kiro",
+  "kimi",
+  "kimi-code",
+  "mimo",
+  "omp",
+  "opencode",
+  "openclaw",
+  "pi",
+  "roocode",
+  "workbuddy",
+  "zcode",
+  "zed",
+]);
 
 function warnProviderParseFailure(label, err, opts) {
   if (opts?.auto) return;
@@ -218,55 +255,74 @@ async function cmdSync(argv) {
     const mimoHome = process.env.MIMO_HOME || path.join(xdgDataHome, "mimocode");
     const zcodeHome = process.env.ZCODE_HOME || path.join(home, ".zcode");
 
-    // OpenClaw session plugin integration: allow the plugin to request incremental parsing for a single session jsonl.
-    // We still parse all regular sources so model/source attribution stays complete (e.g. Kimi sessions).
+    // OpenClaw session plugin integration: lifecycle hooks request an
+    // OpenClaw-only auto sync so unrelated providers do not get walked.
     const openclawSignal = opts.fromOpenclaw
       ? resolveOpenclawSignal({ home, env: process.env })
       : null;
 
-    const sources = [
-      { source: "codex", sessionsDir: path.join(codexHome, "sessions") },
-      // Codex-Manager archives sessions to ~/.codex/archived_sessions/ on every
-      // account/channel switch (issue #187). Scanning it too keeps that usage
-      // counted instead of orphaning it in the cloud (a re-upload's upsert can
-      // never delete cloud rows whose local source file has vanished). Safe
-      // against double-counting: the codex event dedup keys on sessionUUID (in
-      // the filename) + event timestamp, both stable across a sessions/ ->
-      // archived_sessions/ move, so re-reading an archived copy is a no-op.
-      { source: "codex", sessionsDir: path.join(codexHome, "archived_sessions"), deep: true },
-      { source: "every-code", sessionsDir: path.join(codeHome, "sessions") },
-    ];
+    const autoSourceScope = resolveAutoSourceScope(opts);
+    const isFullSourceScan = !autoSourceScope;
+    const sourceAllowed = (...sources) =>
+      !autoSourceScope || sources.includes(autoSourceScope);
+
+    const sources = [];
+    if (sourceAllowed("codex")) {
+      sources.push(
+        { source: "codex", sessionsDir: path.join(codexHome, "sessions"), codexInventoryCache: true },
+        // Codex-Manager archives sessions to ~/.codex/archived_sessions/ on every
+        // account/channel switch (issue #187). Scanning it too keeps that usage
+        // counted instead of orphaning it in the cloud (a re-upload's upsert can
+        // never delete cloud rows whose local source file has vanished). Safe
+        // against double-counting: the codex event dedup keys on sessionUUID (in
+        // the filename) + event timestamp, both stable across a sessions/ ->
+        // archived_sessions/ move, so re-reading an archived copy is a no-op.
+        { source: "codex", sessionsDir: path.join(codexHome, "archived_sessions"), deep: true },
+      );
+    }
+    if (sourceAllowed("every-code")) {
+      sources.push({ source: "every-code", sessionsDir: path.join(codeHome, "sessions") });
+    }
 
     const rolloutFiles = [];
     const seenSessions = new Set();
+    const codexDayInventoryCache =
+      cursors.codexDayInventoryCache && typeof cursors.codexDayInventoryCache === "object"
+        ? cursors.codexDayInventoryCache
+        : { version: 1, days: {} };
+    if (sourceAllowed("codex")) cursors.codexDayInventoryCache = codexDayInventoryCache;
     for (const entry of sources) {
       if (seenSessions.has(entry.sessionsDir)) continue;
       seenSessions.add(entry.sessionsDir);
       const files = entry.deep
         ? await listRolloutFilesDeep(entry.sessionsDir)
-        : await listRolloutFiles(entry.sessionsDir);
+        : await listRolloutFiles(entry.sessionsDir, entry.codexInventoryCache
+          ? { dayInventoryCache: codexDayInventoryCache }
+          : undefined);
       for (const filePath of files) {
         rolloutFiles.push({ path: filePath, source: entry.source });
       }
     }
 
-    await migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles });
-    await repairCodexRescanInflation({
-      cursors,
-      queuePath,
-      queueStatePath,
-      projectQueuePath,
-      projectQueueStatePath,
-      rolloutFiles,
-    });
-    await repairDroidDuplicateSessionInflation({ cursors, queuePath, queueStatePath });
-    await repairMimoClaudeMislabel({
-      cursors,
-      queuePath,
-      queueStatePath,
-      projectQueuePath,
-      projectQueueStatePath,
-    });
+    if (isFullSourceScan) {
+      await migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles });
+      await repairCodexRescanInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+        rolloutFiles,
+      });
+      await repairDroidDuplicateSessionInflation({ cursors, queuePath, queueStatePath });
+      await repairMimoClaudeMislabel({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+      });
+    }
 
     const openclawFiles = openclawSignal?.sessionFile
       ? [{ path: openclawSignal.sessionFile, source: "openclaw" }]
@@ -300,7 +356,7 @@ async function cmdSync(argv) {
     }
 
     let openclawResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (openclawFiles.length > 0) {
+    if (sourceAllowed("openclaw") && openclawFiles.length > 0) {
       // Only runs when explicitly triggered by the OpenClaw session plugin.
       try {
         openclawResult = await parseOpenclawIncremental({
@@ -316,30 +372,34 @@ async function cmdSync(argv) {
     }
 
     let openclawFallback = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    try {
-      openclawFallback = await applyOpenclawTotalsFallback({
-        trackerDir,
-        signal: openclawSignal,
-        cursors,
-        queuePath,
-        projectQueuePath,
-      });
-    } catch (err) {
-      warnProviderParseFailure("OpenClaw", err, opts);
+    if (sourceAllowed("openclaw")) {
+      try {
+        openclawFallback = await applyOpenclawTotalsFallback({
+          trackerDir,
+          signal: openclawSignal,
+          cursors,
+          queuePath,
+          projectQueuePath,
+        });
+      } catch (err) {
+        warnProviderParseFailure("OpenClaw", err, opts);
+      }
     }
     openclawResult.filesProcessed += openclawFallback.filesProcessed;
     openclawResult.eventsAggregated += openclawFallback.eventsAggregated;
     openclawResult.bucketsQueued += openclawFallback.bucketsQueued;
 
-    const claudeFiles = await listClaudeProjectFiles(claudeProjectsDir);
-    await reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath, queueStatePath });
-    await repairClaudeQueueFromGroundTruth({
-      cursors,
-      queuePath,
-      queueStatePath,
-      projectQueuePath,
-      projectQueueStatePath,
-    });
+    const claudeFiles = sourceAllowed("claude") ? await listClaudeProjectFiles(claudeProjectsDir) : [];
+    if (isFullSourceScan) {
+      await reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath, queueStatePath });
+      await repairClaudeQueueFromGroundTruth({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+      });
+    }
     let claudeResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (claudeFiles.length > 0) {
       if (progress?.enabled) {
@@ -369,7 +429,7 @@ async function cmdSync(argv) {
       }
     }
 
-    const geminiFiles = await listGeminiSessionFiles(geminiTmpDir);
+    const geminiFiles = sourceAllowed("gemini") ? await listGeminiSessionFiles(geminiTmpDir) : [];
     let geminiResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (geminiFiles.length > 0) {
       if (progress?.enabled) {
@@ -399,7 +459,7 @@ async function cmdSync(argv) {
       }
     }
 
-    const antigravityFiles = await listAntigravityTranscripts(geminiHome);
+    const antigravityFiles = sourceAllowed("antigravity") ? await listAntigravityTranscripts(geminiHome) : [];
     let antigravityResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (antigravityFiles.length > 0) {
       if (progress?.enabled) {
@@ -429,7 +489,7 @@ async function cmdSync(argv) {
       }
     }
 
-    const opencodeFiles = await listOpencodeMessageFiles(opencodeStorageDir);
+    const opencodeFiles = sourceAllowed("opencode") ? await listOpencodeMessageFiles(opencodeStorageDir) : [];
     let opencodeResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (opencodeFiles.length > 0) {
       if (progress?.enabled) {
@@ -462,7 +522,7 @@ async function cmdSync(argv) {
     // OpenCode v1.2+ stores messages in SQLite (opencode.db) instead of JSON files.
     const opencodeDbPath = path.join(opencodeHome, "opencode.db");
     let opencodeDbResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const dbMessages = readOpencodeDbMessages(opencodeDbPath);
+    const dbMessages = sourceAllowed("opencode") ? readOpencodeDbMessages(opencodeDbPath) : [];
     if (dbMessages.length > 0) {
       if (progress?.enabled) {
         progress.start(
@@ -500,7 +560,7 @@ async function cmdSync(argv) {
     // the message indexes don't collide.
     const kiloDbPath = path.join(kiloHome, "kilo.db");
     let kiloResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const kiloDbMessages = readOpencodeDbMessages(kiloDbPath);
+    const kiloDbMessages = sourceAllowed("kilo-cli") ? readOpencodeDbMessages(kiloDbPath) : [];
     if (kiloDbMessages.length > 0) {
       if (progress?.enabled) {
         progress.start(
@@ -540,7 +600,7 @@ async function cmdSync(argv) {
     // double-count and mislabel Claude usage as mimo.
     const mimoDbPath = path.join(mimoHome, "mimocode.db");
     let mimoResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const mimoDbMessages = readMimoDbMessages(mimoDbPath);
+    const mimoDbMessages = sourceAllowed("mimo") ? readMimoDbMessages(mimoDbPath) : [];
     if (mimoDbMessages.length > 0) {
       if (progress?.enabled) {
         progress.start(
@@ -581,7 +641,7 @@ async function cmdSync(argv) {
     // would double-count.
     const zcodeDbPath = path.join(zcodeHome, "cli", "db", "db.sqlite");
     let zcodeResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const zcodeDbMessages = readZcodeDbMessages(zcodeDbPath);
+    const zcodeDbMessages = sourceAllowed("zcode") ? readZcodeDbMessages(zcodeDbPath) : [];
     if (zcodeDbMessages.length > 0) {
       if (progress?.enabled) {
         progress.start(
@@ -612,7 +672,7 @@ async function cmdSync(argv) {
     }
 
     // ── Kilo Code VS Code extension (Cline-style ui_messages.json) ──
-    const kilocodeTaskFiles = resolveKilocodeTaskFiles(process.env);
+    const kilocodeTaskFiles = sourceAllowed("kilocode") ? resolveKilocodeTaskFiles(process.env) : [];
     let kilocodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (kilocodeTaskFiles.length > 0) {
       if (progress?.enabled) {
@@ -643,7 +703,7 @@ async function cmdSync(argv) {
     // ── Goose (Block) — SQLite sessions with cumulative tokens per session ──
     const gooseDbPath = resolveGooseDbPath(process.env);
     let gooseResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (fssync.existsSync(gooseDbPath)) {
+    if (sourceAllowed("goose") && fssync.existsSync(gooseDbPath)) {
       if (progress?.enabled) {
         progress.start(`Parsing Goose ${renderBar(0)} 0 sessions | buckets 0`);
       }
@@ -668,7 +728,7 @@ async function cmdSync(argv) {
     }
 
     // ── Droid (Factory CLI) — passive reader for ~/.factory/sessions/*.settings.json ──
-    const droidSettingsFiles = listDroidSettingsFiles(process.env);
+    const droidSettingsFiles = sourceAllowed("droid") ? listDroidSettingsFiles(process.env) : [];
     let droidResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (droidSettingsFiles.length > 0) {
       if (progress?.enabled) {
@@ -703,7 +763,7 @@ async function cmdSync(argv) {
     // ── Zed Agent (all providers; cumulative-delta over SQLite threads) ──
     const zedDbPath = resolveZedDbPath(process.env);
     let zedResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (fssync.existsSync(zedDbPath)) {
+    if (sourceAllowed("zed") && fssync.existsSync(zedDbPath)) {
       if (progress?.enabled) {
         progress.start(`Parsing Zed Agent ${renderBar(0)} 0 threads | buckets 0`);
       }
@@ -728,7 +788,7 @@ async function cmdSync(argv) {
     }
 
     // ── Roo Code VS Code extension (Cline-derived; rooveterinaryinc.roo-cline) ──
-    const roocodeTaskFiles = resolveRoocodeTaskFiles(process.env);
+    const roocodeTaskFiles = sourceAllowed("roocode") ? resolveRoocodeTaskFiles(process.env) : [];
     let roocodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (roocodeTaskFiles.length > 0) {
       if (progress?.enabled) {
@@ -762,10 +822,12 @@ async function cmdSync(argv) {
     // cursor records under model="unknown". Purge those local buckets, emit
     // zero retractions so the cloud upserts overwrite them to zero, and reset
     // the incremental cursor so the fixed parser re-fetches all affected rows.
-    await migrateCursorUnknownBuckets({ cursors, queuePath });
+    if (isFullSourceScan) {
+      await migrateCursorUnknownBuckets({ cursors, queuePath });
+    }
 
     let cursorResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (isCursorInstalled({ home })) {
+    if (sourceAllowed("cursor") && isCursorInstalled({ home })) {
       const cursorAuth = extractCursorSessionToken({ home });
       if (cursorAuth) {
         try {
@@ -808,7 +870,7 @@ async function cmdSync(argv) {
     let kiroResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const kiroDbPath = resolveKiroDbPath();
     const kiroJsonlPath = resolveKiroJsonlPath();
-    if (fssync.existsSync(kiroDbPath) || fssync.existsSync(kiroJsonlPath)) {
+    if (sourceAllowed("kiro") && (fssync.existsSync(kiroDbPath) || fssync.existsSync(kiroJsonlPath))) {
       if (progress?.enabled) {
         progress.start(`Parsing Kiro ${renderBar(0)} | buckets 0`);
       }
@@ -834,7 +896,7 @@ async function cmdSync(argv) {
     // ── Hermes Agent (SQLite-based) ──
     let hermesResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const hermesPath = resolveHermesPath();
-    if (fssync.existsSync(hermesPath)) {
+    if (sourceAllowed("hermes") && fssync.existsSync(hermesPath)) {
       if (progress?.enabled) {
         progress.start(`Parsing Hermes ${renderBar(0)} | buckets 0`);
       }
@@ -865,8 +927,8 @@ async function cmdSync(argv) {
     // 4 chars/token from user prompt chars and assistant response chars.
     let kiroCliResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const kiroCliDb = resolveKiroCliDbPath(process.env);
-    const kiroCliSessionFiles = resolveKiroCliSessionFiles(process.env);
-    if (fssync.existsSync(kiroCliDb) || kiroCliSessionFiles.length > 0) {
+    const kiroCliSessionFiles = sourceAllowed("kiro") ? resolveKiroCliSessionFiles(process.env) : [];
+    if (sourceAllowed("kiro") && (fssync.existsSync(kiroCliDb) || kiroCliSessionFiles.length > 0)) {
       if (progress?.enabled) {
         progress.start(`Parsing Kiro CLI ${renderBar(0)} | buckets 0`);
       }
@@ -892,7 +954,7 @@ async function cmdSync(argv) {
 
     // ── Kimi (passive wire.jsonl reader) ──
     let kimiResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const kimiWireFiles = resolveKimiWireFiles(process.env);
+    const kimiWireFiles = sourceAllowed("kimi") ? resolveKimiWireFiles(process.env) : [];
     if (kimiWireFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Kimi Code ${renderBar(0)} | buckets 0`);
@@ -918,7 +980,7 @@ async function cmdSync(argv) {
 
     // ── Kimi Code official (@moonshot-ai/kimi-code, ~/.kimi-code) ──
     let kimiCodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const kimiCodeWireFiles = resolveKimiCodeWireFiles(process.env);
+    const kimiCodeWireFiles = sourceAllowed("kimi-code") ? resolveKimiCodeWireFiles(process.env) : [];
     if (kimiCodeWireFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Kimi Code (official) ${renderBar(0)} | buckets 0`);
@@ -946,7 +1008,7 @@ async function cmdSync(argv) {
     // Tencent's CodeBuddy CLI is a Claude Code clone; no hook system, so we
     // tail the per-session JSONL conversation logs incrementally on each sync.
     let codebuddyResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const codebuddyFiles = resolveCodebuddyProjectFiles(process.env);
+    const codebuddyFiles = sourceAllowed("codebuddy") ? resolveCodebuddyProjectFiles(process.env) : [];
     if (codebuddyFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing CodeBuddy ${renderBar(0)} | buckets 0`);
@@ -976,7 +1038,7 @@ async function cmdSync(argv) {
     // sub-agent logs nest one level deeper, so the resolver recurses. See the
     // parser comment in rollout.js for the cache-aware token math.
     let workbuddyResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const workbuddyFiles = resolveWorkbuddyProjectFiles(process.env);
+    const workbuddyFiles = sourceAllowed("workbuddy") ? resolveWorkbuddyProjectFiles(process.env) : [];
     if (workbuddyFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing WorkBuddy ${renderBar(0)} | buckets 0`);
@@ -1002,7 +1064,7 @@ async function cmdSync(argv) {
 
     // ── oh-my-pi (passive ~/.omp/agent/sessions/**/*.jsonl reader) ──
     let ompResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const ompFiles = resolveOmpSessionFiles(process.env);
+    const ompFiles = sourceAllowed("omp") ? resolveOmpSessionFiles(process.env) : [];
     if (ompFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing oh-my-pi ${renderBar(0)} | buckets 0`);
@@ -1031,7 +1093,7 @@ async function cmdSync(argv) {
     // prevents double-counting when explicit overrides (TOKENTRACKER_OMP_AGENT_DIR /
     // TOKENTRACKER_PI_AGENT_DIR) bypass the install-signal disambiguator.
     let piResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const piFiles = piAgentDirCollidesWithOmp(process.env)
+    const piFiles = !sourceAllowed("pi") || piAgentDirCollidesWithOmp(process.env)
       ? []
       : resolvePiSessionFiles(process.env);
     if (piFiles.length > 0) {
@@ -1059,7 +1121,7 @@ async function cmdSync(argv) {
 
     // ── Craft Agents (passive ~/.craft-agent + workspaces session.jsonl reader) ──
     let craftResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const craftFiles = resolveCraftSessionFiles(process.env);
+    const craftFiles = sourceAllowed("craft") ? resolveCraftSessionFiles(process.env) : [];
     if (craftFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Craft ${renderBar(0)} | buckets 0`);
@@ -1086,9 +1148,9 @@ async function cmdSync(argv) {
     // ── Grok Build (xAI) ──
     let grokResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     // Full passive scan of all Grok sessions (historical + any not covered by hook)
-    const grokSessions = resolveGrokBuildSessions(process.env);
+    const grokSessions = sourceAllowed("grok") ? resolveGrokBuildSessions(process.env) : [];
     const grokSessionInputs = [...grokSessions];
-    if (grokHookSignal && typeof grokHookSignal === "object") {
+    if (sourceAllowed("grok") && grokHookSignal && typeof grokHookSignal === "object") {
       const hookSessionId =
         typeof grokHookSignal.sessionId === "string" && grokHookSignal.sessionId.trim()
           ? grokHookSignal.sessionId.trim()
@@ -1153,13 +1215,13 @@ async function cmdSync(argv) {
         bucketsQueued: grokResult.bucketsQueued + grokScanResult.bucketsQueued,
       };
     }
-    if (opts.repairGrok) {
+    if (isFullSourceScan && opts.repairGrok) {
       await repairGrokQueueFromSessionSnapshots({ cursors, queuePath, queueStatePath });
     }
 
     // ── GitHub Copilot CLI (OTEL JSONL files) ──
     let copilotResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const copilotPaths = resolveCopilotOtelPaths(process.env);
+    const copilotPaths = sourceAllowed("copilot") ? resolveCopilotOtelPaths(process.env) : [];
     if (copilotPaths.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Copilot ${renderBar(0)} | buckets 0`);
@@ -1183,7 +1245,7 @@ async function cmdSync(argv) {
       }
     }
 
-    if (cursors?.projectHourly?.projects && projectQueuePath && projectQueueStatePath) {
+    if (isFullSourceScan && cursors?.projectHourly?.projects && projectQueuePath && projectQueueStatePath) {
       for (const [projectKey, meta] of Object.entries(cursors.projectHourly.projects)) {
         if (!meta || typeof meta !== "object") continue;
         if (meta.status !== "blocked" || !meta.purge_pending) continue;
@@ -1198,7 +1260,9 @@ async function cmdSync(argv) {
       }
     }
 
-    await applyCloudConversationsBackfill({ cursors, queueStatePath });
+    if (isFullSourceScan) {
+      await applyCloudConversationsBackfill({ cursors, queueStatePath });
+    }
 
     cursors.updatedAt = new Date().toISOString();
     await writeJson(cursorsPath, cursors);
@@ -1274,7 +1338,8 @@ async function cmdSync(argv) {
           retryAtMs,
           reason: "backlog",
           pendingBytes,
-          source: "auto-backlog",
+          source: autoSourceScope ? `${autoSourceScope}-backlog` : "auto-backlog",
+          syncSource: autoSourceScope,
           autoRetryNoSpawn: runtime.autoRetryNoSpawn,
         });
       }
@@ -1367,6 +1432,7 @@ function parseArgs(argv) {
     fromNotify: false,
     fromRetry: false,
     fromOpenclaw: false,
+    source: null,
     drain: false,
     repairGrok: false,
   };
@@ -1376,11 +1442,32 @@ function parseArgs(argv) {
     else if (a === "--from-notify") out.fromNotify = true;
     else if (a === "--from-retry") out.fromRetry = true;
     else if (a === "--from-openclaw") out.fromOpenclaw = true;
+    else if (a === "--source") {
+      out.source = normalizeSyncSource(argv[i + 1]);
+      i += 1;
+    }
+    else if (a.startsWith("--source=")) out.source = normalizeSyncSource(a.slice("--source=".length));
     else if (a === "--drain") out.drain = true;
     else if (a === "--repair-grok") out.repairGrok = true;
     else throw new Error(`Unknown option: ${a}`);
   }
   return out;
+}
+
+function resolveAutoSourceScope(opts) {
+  if (!opts?.auto) return null;
+  if (opts.fromOpenclaw) return "openclaw";
+  if (opts.fromRetry) return normalizeSyncSource(opts.source);
+  if (!opts.fromNotify) return null;
+  return normalizeSyncSource(opts.source);
+}
+
+function normalizeSyncSource(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  const aliased = AUTO_SYNC_SOURCE_ALIASES.get(normalized) || normalized;
+  return AUTO_SYNC_SOURCES.has(aliased) ? aliased : null;
 }
 
 module.exports = {
@@ -1393,6 +1480,8 @@ module.exports = {
   reincludeClaudeMemObserverFiles,
   repairGrokQueueFromSessionSnapshots,
   applyCloudConversationsBackfill,
+  scheduleAutoRetry,
+  buildAutoRetryScript,
   CURSOR_UNKNOWN_MIGRATION_KEY,
   ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY,
   CODEX_RESCAN_DEDUP_REPAIR_KEY,
@@ -1574,6 +1663,7 @@ async function scheduleAutoRetry({
   reason,
   pendingBytes,
   source,
+  syncSource,
   autoRetryNoSpawn,
 }) {
   const retryMs = coerceRetryMs(retryAtMs);
@@ -1583,19 +1673,33 @@ async function scheduleAutoRetry({
   const nowMs = Date.now();
   const existing = await readJson(retryPath);
   const existingMs = coerceRetryMs(existing?.retryAtMs);
+  const normalizedSyncSource = normalizeSyncSource(syncSource);
   if (existingMs && existingMs >= retryMs - 1000) {
+    const existingSyncSource = normalizeSyncSource(existing?.syncSource);
+    if (existingSyncSource !== normalizedSyncSource) {
+      await writeJson(
+        retryPath,
+        buildAutoRetryPayload({
+          retryMs: existingMs,
+          nowMs,
+          reason,
+          pendingBytes,
+          source,
+          syncSource: normalizedSyncSource,
+        }),
+      );
+    }
     return { scheduled: false, retryAtMs: existingMs };
   }
 
-  const payload = {
-    version: 1,
-    retryAtMs: retryMs,
-    retryAt: new Date(retryMs).toISOString(),
-    reason: typeof reason === "string" && reason.length > 0 ? reason : "throttled",
-    pendingBytes: Math.max(0, Number(pendingBytes || 0)),
-    scheduledAt: new Date(nowMs).toISOString(),
-    source: typeof source === "string" ? source : "auto",
-  };
+  const payload = buildAutoRetryPayload({
+    retryMs,
+    nowMs,
+    reason,
+    pendingBytes,
+    source,
+    syncSource: normalizedSyncSource,
+  });
 
   await writeJson(retryPath, payload);
 
@@ -1612,6 +1716,20 @@ async function scheduleAutoRetry({
     delayMs,
   });
   return { scheduled: true, retryAtMs: retryMs };
+}
+
+function buildAutoRetryPayload({ retryMs, nowMs, reason, pendingBytes, source, syncSource }) {
+  const payload = {
+    version: 1,
+    retryAtMs: retryMs,
+    retryAt: new Date(retryMs).toISOString(),
+    reason: typeof reason === "string" && reason.length > 0 ? reason : "throttled",
+    pendingBytes: Math.max(0, Number(pendingBytes || 0)),
+    scheduledAt: new Date(nowMs).toISOString(),
+    source: typeof source === "string" ? source : "auto",
+  };
+  if (syncSource) payload.syncSource = syncSource;
+  return payload;
 }
 
 async function clearAutoRetry(trackerDir) {
@@ -1641,13 +1759,18 @@ function buildAutoRetryScript({ retryPath, trackerBinPath, fallbackPkg, delayMs 
     `const fallbackPkg = ${JSON.stringify(fallbackPkg)};\n` +
     `const delayMs = ${Math.max(0, Math.floor(delayMs || 0))};\n` +
     `setTimeout(() => {\n` +
+    `  let payload = null;\n` +
     `  let retryAtMs = 0;\n` +
     `  try {\n` +
     `    const raw = fs.readFileSync(retryPath, 'utf8');\n` +
-    `    retryAtMs = Number(JSON.parse(raw).retryAtMs || 0);\n` +
+    `    payload = JSON.parse(raw);\n` +
+    `    retryAtMs = Number(payload.retryAtMs || 0);\n` +
     `  } catch (_) {}\n` +
     `  if (!retryAtMs || Date.now() + 1000 < retryAtMs) process.exit(0);\n` +
     `  const argv = ['sync', '--auto', '--from-retry'];\n` +
+    `  if (payload && typeof payload.syncSource === 'string' && payload.syncSource.trim()) {\n` +
+    `    argv.push('--source', payload.syncSource.trim());\n` +
+    `  }\n` +
     `  const cmd = fs.existsSync(trackerBinPath)\n` +
     `    ? [process.execPath, trackerBinPath, ...argv]\n` +
     `    : ['npx', '--yes', fallbackPkg, ...argv];\n` +
