@@ -515,7 +515,6 @@ test("parseRolloutIncremental re-reads same-inode truncation when project state 
     );
 
     await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
-    const beforeStat = await fs.stat(rolloutPath);
     const beforeOffset = cursors.files[rolloutPath].offset;
 
     const secondUsage = {
@@ -531,10 +530,18 @@ test("parseRolloutIncremental re-reads same-inode truncation when project state 
         last: secondUsage,
         total: secondUsage,
       }) + "\n";
-    await fs.truncate(rolloutPath, 0);
-    await fs.appendFile(rolloutPath, truncatedBody, "utf8");
+    const rewriteHandle = await fs.open(rolloutPath, "r+");
+    let beforeStat;
+    let afterStat;
+    try {
+      beforeStat = await rewriteHandle.stat();
+      await rewriteHandle.truncate(0);
+      await rewriteHandle.write(truncatedBody, 0, "utf8");
+      afterStat = await rewriteHandle.stat();
+    } finally {
+      await rewriteHandle.close();
+    }
 
-    const afterStat = await fs.stat(rolloutPath);
     assert.equal(afterStat.ino, beforeStat.ino);
     assert.ok(afterStat.size < beforeOffset);
 
@@ -550,15 +557,18 @@ test("parseRolloutIncremental re-reads same-inode truncation when project state 
       reasoning_output_tokens: 0,
       total_tokens: 10,
     };
-    await fs.appendFile(
-      rolloutPath,
+    const appendedBody =
       buildTokenCountLine({
         ts: "2026-01-26T00:30:00.000Z",
         last: thirdUsage,
         total: thirdUsage,
-      }) + "\n",
-      "utf8",
-    );
+      }) + "\n";
+    const appendHandle = await fs.open(rolloutPath, "a");
+    try {
+      await appendHandle.writeFile(appendedBody, "utf8");
+    } finally {
+      await appendHandle.close();
+    }
     const third = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
     assert.equal(third.filesProcessed, 1);
     assert.equal(third.eventsAggregated, 1);

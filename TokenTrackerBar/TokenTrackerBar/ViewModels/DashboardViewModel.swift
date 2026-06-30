@@ -242,7 +242,9 @@ class DashboardViewModel: ObservableObject {
 
     /// Initial launch: sync data first, then load dashboard.
     func syncThenLoad() async {
+        guard !isSyncing else { return }
         isSyncing = true
+        defer { isSyncing = false }
         var didSync = false
         do {
             _ = try await APIClient.shared.triggerSync()
@@ -250,7 +252,6 @@ class DashboardViewModel: ObservableObject {
         } catch {
             // Sync failure is non-fatal — proceed with whatever data exists
         }
-        isSyncing = false
         if didSync {
             lastBackgroundSyncAt = Date()
         }
