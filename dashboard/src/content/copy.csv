@@ -1030,3 +1030,14 @@ limits.opencodeGo.setupHint.step3,ui,LimitsPage,UsageLimitsPanel,opencode_go_hin
 limits.opencodeGo.setupHint.note_app,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_note_app,"macOS app: set with launchctl setenv, then reopen the app.",,active
 limits.opencodeGo.setupHint.copy,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_copy,"Copy",,active
 limits.opencodeGo.setupHint.copied,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_copied,"Copied",,active
+settings.menubar.updates.checking,ui,SettingsPage,NativeAppFooter,updates_checking,"Checking...","正在检测...",active
+settings.menubar.updates.upToDate,ui,SettingsPage,NativeAppFooter,updates_uptodate,"You are up to date!","已是最新版本",active
+settings.menubar.updates.failed,ui,SettingsPage,NativeAppFooter,updates_failed,"Failed to check for updates. Please try again.","检查更新失败，请重试",active
+settings.menubar.updates.modalTitle,ui,SettingsPage,NativeAppFooter,updates_title,"Update Available","发现新版本",active
+settings.menubar.updates.modalDescription,ui,SettingsPage,NativeAppFooter,updates_desc,"A new version {{version}} is available. Would you like to view and download it on GitHub?","发现新版本 {{version}}。是否前往 GitHub 查看并下载？",active
+settings.menubar.updates.modalConfirm,ui,SettingsPage,NativeAppFooter,updates_confirm,"Download","前往下载",active
+settings.menubar.updates.modalCancel,ui,SettingsPage,NativeAppFooter,updates_cancel,"Cancel","取消",active
+settings.menubar.updates.footerCore,ui,SettingsPage,NativeAppFooter,updates_footer_core,"TokenTracker v{{version}}",,active
+settings.menubar.updates.footerCombined,ui,SettingsPage,NativeAppFooter,updates_footer_combined,"TokenTrackerBar v{{barVersion}} (Core v{{coreVersion}})",,active
+
+

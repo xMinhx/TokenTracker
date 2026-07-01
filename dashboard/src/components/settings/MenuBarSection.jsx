@@ -72,14 +72,16 @@ export function MenuBarSection() {
 }
 
 function hasUpdate(current, latest) {
-  const parseParts = (v) => v.replace(/^v/, "").split(".").map(Number);
+  function parseParts(v) {
+    return v.replace(/^v/, "").split(".").map(Number);
+  }
   const currParts = parseParts(current);
   const lateParts = parseParts(latest);
   for (let i = 0; i < Math.max(currParts.length, lateParts.length); i++) {
     const curr = currParts[i] || 0;
     const late = lateParts[i] || 0;
-    if (late > curr) return true;
-    if (late < curr) return false;
+    if (curr < late) return true;
+    if (curr > late) return false;
   }
   return false;
 }
@@ -94,7 +96,6 @@ export function NativeAppFooter() {
     htmlUrl: "",
   });
   const { resolvedLocale } = useLocale();
-  const isZh = resolvedLocale?.startsWith("zh");
   const currentVersion = import.meta.env.VITE_APP_VERSION || "0.64.2";
 
   const handleCheckUpdates = async () => {
@@ -113,32 +114,32 @@ export function NativeAppFooter() {
         });
       } else {
         showToast({
-          title: isZh ? "已是最新版本" : "You are up to date!",
+          title: copy("settings.menubar.updates.upToDate"),
         });
       }
     } catch (err) {
       console.error("Check updates failed:", err);
       showToast({
-        title: isZh ? "检查更新失败，请重试" : "Failed to check for updates. Please try again.",
+        title: copy("settings.menubar.updates.failed"),
       });
     } finally {
       setChecking(false);
     }
   };
 
-  const modalTitle = isZh ? "发现新版本" : "Update Available";
-  const modalDescription = isZh 
-    ? `发现新版本 ${updateModal.latestVersion}。是否前往 GitHub 查看并下载？` 
-    : `A new version ${updateModal.latestVersion} is available. Would you like to view and download it on GitHub?`;
-  const modalConfirm = isZh ? "前往下载" : "Download";
-  const modalCancel = isZh ? "取消" : "Cancel";
+  const modalTitle = copy("settings.menubar.updates.modalTitle");
+  const modalDescription = copy("settings.menubar.updates.modalDescription", {
+    version: updateModal.latestVersion,
+  });
+  const modalConfirm = copy("settings.menubar.updates.modalConfirm");
+  const modalCancel = copy("settings.menubar.updates.modalCancel");
 
   return (
     <div className="mt-6 flex flex-col items-center justify-center gap-4 text-xs text-oai-gray-500 dark:text-oai-gray-500">
       <div className="flex flex-wrap items-center justify-center gap-2">
         {showNativeInfo ? (
           <>
-            <span>TokenTrackerBar v{settings.version} (Core v{currentVersion})</span>
+            <span>{copy("settings.menubar.updates.footerCombined", { barVersion: settings.version, coreVersion: currentVersion })}</span>
             <span aria-hidden>·</span>
             <button
               type="button"
@@ -151,7 +152,7 @@ export function NativeAppFooter() {
           </>
         ) : (
           <>
-            <span>TokenTracker v{currentVersion}</span>
+            <span>{copy("settings.menubar.updates.footerCore", { version: currentVersion })}</span>
             <span aria-hidden>·</span>
             <button
               type="button"
@@ -159,7 +160,7 @@ export function NativeAppFooter() {
               disabled={checking}
               className="underline-offset-2 transition-colors hover:text-oai-gray-700 hover:underline dark:hover:text-oai-gray-300 disabled:opacity-50"
             >
-              {checking ? (isZh ? "正在检测..." : "Checking...") : copy("settings.menubar.checkUpdates")}
+              {checking ? copy("settings.menubar.updates.checking") : copy("settings.menubar.checkUpdates")}
             </button>
             <span aria-hidden>·</span>
           </>
