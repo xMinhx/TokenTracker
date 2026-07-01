@@ -243,12 +243,12 @@ describe("UsageLimitsPanel", () => {
     );
 
     expect(screen.getByText("Codex")).toBeInTheDocument();
-    expectLimitRow("Credits", "<1%");
-    expect(
-      screen.getByText(
-        `${formatAmount(51.03434884548187)} / ${formatAmount(37_500)} credits used · ${formatAmount(37_448.96565115452)} left`,
-      ),
-    ).toBeInTheDocument();
+    const row = screen.getByText("Credits").closest("div");
+    expect(within(row).getByText("<1%")).toBeInTheDocument();
+    // Amounts show in the hover tooltip, not as an always-visible line.
+    expect(within(row).getByRole("tooltip")).toHaveTextContent(
+      `${formatAmount(51.03434884548187)} / ${formatAmount(37_500)} credits used · ${formatAmount(37_448.96565115452)} left`,
+    );
   });
 
   it("renders Codex Reset rows after quota rows without years, collapsed labels, or quota percentages", () => {

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-01T12:00:56.354Z",
+  "generatedAt": "2026-07-01T12:12:18.512Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 275,
-    "rawText": 170
+    "rawText": 168
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -52,11 +52,9 @@
     },
     "dashboard/src/components/settings/MenuBarSection.jsx": {
       "colors": 0,
-      "rawText": 3,
+      "rawText": 1,
       "rawTextTokens": [
-        "GitHub",
-        "curr) return true; if (late",
-        "v.replace(/^v/, \"\").split(\".\").map(Number); const currParts = parseParts(current); const lateParts = parseParts(latest); for (let i = 0; i"
+        "GitHub"
       ]
     },
     "dashboard/src/contexts/LoginModalContext.jsx": {
@@ -332,7 +330,7 @@
       "rawText": 3,
       "rawTextTokens": [
         ", ); // Brand name only — no plan_label suffix to avoid \"OpenCode Go Go\". expect(screen.getByText(\"OpenCode Go\")).toBeInTheDocument(); expect(screen.getByText(\"5h\")).toBeInTheDocument(); expect(screen.getByText(\"Weekly\")).toBeInTheDocument(); expect(screen.getByText(\"Monthly\")).toBeInTheDocument(); expect(screen.getByText(\"12%\")).toBeInTheDocument(); expect(screen.getByText(\"30%\")).toBeInTheDocument(); expect(screen.getByText(\"60%\")).toBeInTheDocument(); // Not-configured fallback. rerender(",
-        ", ); expect(screen.getByText(\"Codex\")).toBeInTheDocument(); expectLimitRow(\"Credits\", \"",
+        ", ); expect(screen.getByText(\"Codex\")).toBeInTheDocument(); const row = screen.getByText(\"Credits\").closest(\"div\"); expect(within(row).getByText(\"",
         ", ); expect(screen.getByText(\"Cursor\")).toBeInTheDocument(); rerender("
       ]
     },

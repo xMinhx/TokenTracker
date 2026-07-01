@@ -86,7 +86,26 @@ function paceForSpec(spec, mode) {
   });
 }
 
-function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePercent = null, paceOver = false }) {
+/**
+ * Small styled hover tooltip. Positions itself above the nearest ancestor
+ * that has `group relative` on it — the caller owns that wrapper so this
+ * stays a plain sibling, not an extra layout-affecting box. Glass-card
+ * styling matches ActivityHeatmap3D's hover tooltip (backdrop-blur + subtle
+ * border + shadow-xl) for a consistent hover-surface language app-wide.
+ */
+function Tooltip({ text }) {
+  if (!text) return null;
+  return (
+    <div
+      role="tooltip"
+      className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-max max-w-[220px] -translate-x-1/2 rounded-xl border border-oai-gray-200/50 dark:border-oai-gray-800/50 bg-white/90 dark:bg-oai-gray-900/90 backdrop-blur-md px-2.5 py-1.5 text-[10.5px] leading-snug text-oai-gray-700 dark:text-oai-gray-200 shadow-xl opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+    >
+      {text}
+    </div>
+  );
+}
+
+function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePercent = null, paceOver = false, title = null }) {
   const rawUsed = Math.max(0, Math.min(100, Number(pct) || 0));
   const displayPct = mode === LIMIT_DISPLAY_MODES.REMAINING ? 100 - rawUsed : rawUsed;
   const rounded = Math.round(displayPct);
@@ -98,7 +117,8 @@ function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePerc
   }
   const paceX = pacePercent == null ? null : Math.max(0, Math.min(100, pacePercent));
   return (
-    <div className="flex items-center gap-2">
+    <div className="group relative flex items-center gap-2">
+      <Tooltip text={title} />
       <span
         data-limit-label=""
         className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 shrink-0 whitespace-nowrap"
@@ -259,6 +279,7 @@ function LimitWindowSection({ rows, mode, extra = null }) {
           mode={mode}
           pacePercent={pace.pacePercent}
           paceOver={pace.paceOver}
+          title={spec.key === "credits" ? buildCodexCreditDetail(spec.window) : null}
         />
       ))}
       {showEmpty ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
@@ -312,15 +333,10 @@ function ResetBankSection({ model }) {
 
 function renderProviderExtra(kind, data) {
   if (kind === "codex_meta") {
-    const creditDetail = buildCodexCreditDetail(data.credit_window);
+    // Credit amounts show on hover (LimitBar's title) instead of an
+    // always-visible line, matching the compact menu-bar popover.
     const resetModel = buildResetBankRows(data.reset_credits);
-    if (!creditDetail && !resetModel) return null;
-    return (
-      <>
-        {creditDetail ? <StatusLine>{creditDetail}</StatusLine> : null}
-        {resetModel ? <ResetBankSection model={resetModel} /> : null}
-      </>
-    );
+    return resetModel ? <ResetBankSection model={resetModel} /> : null;
   }
   if (kind === "kimi_parallel" && data.parallel_limit) {
     return <StatusLine>{copy("limits.label.kimi_parallel", { count: data.parallel_limit })}</StatusLine>;
