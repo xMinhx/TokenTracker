@@ -10,6 +10,7 @@ const {
   listRolloutFiles,
   listRolloutFilesDeep,
   codexSessionIdFromPath,
+  filterColdCodexRolloutFiles,
   listClaudeProjectFiles,
   listGeminiSessionFiles,
   listOpencodeMessageFiles,
@@ -152,6 +153,8 @@ const CLOUD_CONVERSATIONS_BACKFILL_KEY = "cloudConversationsBackfill_2026_06";
 // would lose that history (ref the v6 ground-truth-repair data-loss incident).
 const CODEX_RESCAN_DEDUP_REPAIR_KEY = "codexRescanDedupRepair_2026_06";
 const DROID_DUP_SESSION_REPAIR_KEY = "droidDupSessionInflationRepair_2026_06";
+const CODEX_COLD_SCAN_AUDIT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const CODEX_COLD_SCAN_AUDIT_MAX_SYNCS = 288;
 // 0.57.0 mis-attributed mimocode's mirrored Claude/claude-mem history to
 // source=mimo (read the whole DB instead of only providerID=mimo rows). This
 // one-time repair purges all source=mimo data from the local queues + cursor
@@ -324,20 +327,35 @@ async function cmdSync(argv) {
       });
     }
 
+    const codexColdSkipEnabled = opts.auto && isFullSourceScan && sourceAllowed("codex");
+    const codexColdAuditDue = codexColdSkipEnabled
+      ? isCodexColdScanAuditDue(cursors)
+      : false;
+    const codexColdFilter = codexColdSkipEnabled
+      ? await filterColdCodexRolloutFiles({
+          rolloutFiles,
+          cursors,
+          projectEnabled: true,
+          auditDue: codexColdAuditDue,
+        })
+      : { rolloutFiles, skipped: 0 };
+    const rolloutFilesForParse = codexColdFilter.rolloutFiles;
+
     const openclawFiles = openclawSignal?.sessionFile
       ? [{ path: openclawSignal.sessionFile, source: "openclaw" }]
       : [];
 
     if (progress?.enabled) {
       progress.start(
-        `Parsing ${renderBar(0)} 0/${formatNumber(rolloutFiles.length)} files | buckets 0`,
+        `Parsing ${renderBar(0)} 0/${formatNumber(rolloutFilesForParse.length)} files | buckets 0`,
       );
     }
 
     let parseResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    let codexParseSucceeded = false;
     try {
       parseResult = await parseRolloutIncremental({
-        rolloutFiles,
+        rolloutFiles: rolloutFilesForParse,
         cursors,
         queuePath,
         projectQueuePath,
@@ -351,8 +369,15 @@ async function cmdSync(argv) {
           );
         },
       });
+      codexParseSucceeded = true;
     } catch (err) {
       warnProviderParseFailure("Codex", err, opts);
+    }
+    if (codexColdSkipEnabled && codexParseSucceeded) {
+      recordCodexColdScanAudit(cursors, {
+        fullAudit: codexColdAuditDue,
+        skipped: codexColdFilter.skipped,
+      });
     }
 
     let openclawResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
@@ -1470,6 +1495,54 @@ function normalizeSyncSource(value) {
   return AUTO_SYNC_SOURCES.has(aliased) ? aliased : null;
 }
 
+function isCodexColdScanAuditDue(cursors, nowMs = Date.now()) {
+  const state = cursors?.codexColdScanAudit;
+  if (!state || typeof state !== "object" || state.version !== 1) return true;
+  const lastFullScanAtMs = Number(state.lastFullScanAtMs);
+  if (!Number.isFinite(lastFullScanAtMs) || lastFullScanAtMs <= 0) return true;
+  if (Number.isFinite(nowMs) && lastFullScanAtMs - nowMs > 5 * 60 * 1000) return true;
+  if (Number.isFinite(nowMs) && nowMs - lastFullScanAtMs >= CODEX_COLD_SCAN_AUDIT_INTERVAL_MS) {
+    return true;
+  }
+  const syncsSinceFullScan = Number(state.syncsSinceFullScan || 0);
+  return (
+    Number.isFinite(syncsSinceFullScan) &&
+    syncsSinceFullScan >= CODEX_COLD_SCAN_AUDIT_MAX_SYNCS
+  );
+}
+
+function recordCodexColdScanAudit(cursors, { fullAudit = false, skipped = 0 } = {}, nowMs = Date.now()) {
+  if (!cursors || typeof cursors !== "object") return;
+  const prev =
+    cursors.codexColdScanAudit && typeof cursors.codexColdScanAudit === "object"
+      ? cursors.codexColdScanAudit
+      : {};
+  const previousSyncs = Number(prev.syncsSinceFullScan || 0);
+  const lastFullScanAtMs = Number(prev.lastFullScanAtMs);
+  const next = {
+    version: 1,
+    lastFullScanAtMs: Number.isFinite(lastFullScanAtMs) && lastFullScanAtMs > 0
+      ? lastFullScanAtMs
+      : nowMs,
+    syncsSinceFullScan: Number.isFinite(previousSyncs) && previousSyncs > 0
+      ? previousSyncs
+      : 0,
+    lastSkippedFiles: Math.max(0, Number(skipped) || 0),
+    updatedAt: new Date(nowMs).toISOString(),
+  };
+  if (fullAudit) {
+    next.lastFullScanAtMs = nowMs;
+    next.lastFullScanAt = new Date(nowMs).toISOString();
+    next.syncsSinceFullScan = 0;
+  } else {
+    next.lastFullScanAt = Number.isFinite(next.lastFullScanAtMs)
+      ? new Date(next.lastFullScanAtMs).toISOString()
+      : null;
+    next.syncsSinceFullScan += 1;
+  }
+  cursors.codexColdScanAudit = next;
+}
+
 module.exports = {
   cmdSync,
   migrateCursorUnknownBuckets,
@@ -1482,6 +1555,8 @@ module.exports = {
   applyCloudConversationsBackfill,
   scheduleAutoRetry,
   buildAutoRetryScript,
+  isCodexColdScanAuditDue,
+  recordCodexColdScanAudit,
   CURSOR_UNKNOWN_MIGRATION_KEY,
   ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY,
   CODEX_RESCAN_DEDUP_REPAIR_KEY,

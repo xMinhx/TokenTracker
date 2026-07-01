@@ -14,6 +14,7 @@ const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
 const CLAUDE_MEM_OBSERVER_PROJECT_REF =
   "https://local.tokentracker/claude-mem/observer-sessions";
 const PROJECT_ABSENT_CONTEXT_RESCAN_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_CODEX_COLD_SKIP_RECENT_DAYS = 2;
 
 async function listRolloutFiles(sessionsDir, options = {}) {
   const out = [];
@@ -347,6 +348,108 @@ async function parseRolloutIncremental({
   }
 
   return { filesProcessed, eventsAggregated, bucketsQueued, projectBucketsQueued };
+}
+
+async function filterColdCodexRolloutFiles({
+  rolloutFiles,
+  cursors,
+  projectEnabled = false,
+  auditDue = false,
+  nowMs = Date.now(),
+  recentDays = DEFAULT_CODEX_COLD_SKIP_RECENT_DAYS,
+} = {}) {
+  const files = Array.isArray(rolloutFiles) ? rolloutFiles : [];
+  if (auditDue || !cursors?.files || typeof cursors.files !== "object") {
+    return { rolloutFiles: files, skipped: 0 };
+  }
+
+  const activeDates = activeCodexRolloutDates(files, { nowMs, recentDays });
+  const freshnessCache = new Map();
+  const out = [];
+  let skipped = 0;
+
+  for (const entry of files) {
+    const filePath = typeof entry === "string" ? entry : entry?.path;
+    const source =
+      typeof entry === "string"
+        ? DEFAULT_SOURCE
+        : normalizeSourceInput(entry?.source) || DEFAULT_SOURCE;
+    if (!filePath || source !== DEFAULT_SOURCE) {
+      out.push(entry);
+      continue;
+    }
+
+    const rolloutDate = rolloutDateFromPath(filePath);
+    if (!rolloutDate || activeDates.has(rolloutDate)) {
+      out.push(entry);
+      continue;
+    }
+
+    const prev = cursors.files[filePath];
+    const cachedSize = Number(prev?.offset);
+    if (!Number.isFinite(cachedSize) || cachedSize <= 0) {
+      out.push(entry);
+      continue;
+    }
+
+    if (projectEnabled) {
+      const projectOffset = Number(prev?.projectOffset);
+      if (!Number.isFinite(projectOffset) || projectOffset < cachedSize) {
+        out.push(entry);
+        continue;
+      }
+      if (
+        !(await isProjectFileContextFresh(prev?.projectFileContext, {
+          freshnessCache,
+          nowMs,
+        }))
+      ) {
+        out.push(entry);
+        continue;
+      }
+    }
+
+    skipped += 1;
+  }
+
+  return { rolloutFiles: out, skipped };
+}
+
+function activeCodexRolloutDates(
+  rolloutFiles,
+  { nowMs = Date.now(), recentDays = DEFAULT_CODEX_COLD_SKIP_RECENT_DAYS } = {},
+) {
+  const active = new Set();
+  const days = Math.max(1, Math.floor(Number(recentDays) || 1));
+  const now = new Date(nowMs);
+  if (Number.isFinite(now.getTime())) {
+    for (let i = 0; i < days; i += 1) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      active.add(formatLocalDate(d));
+    }
+  }
+
+  let latest = null;
+  for (const entry of Array.isArray(rolloutFiles) ? rolloutFiles : []) {
+    const filePath = typeof entry === "string" ? entry : entry?.path;
+    const source =
+      typeof entry === "string"
+        ? DEFAULT_SOURCE
+        : normalizeSourceInput(entry?.source) || DEFAULT_SOURCE;
+    if (source !== DEFAULT_SOURCE) continue;
+    const rolloutDate = rolloutDateFromPath(filePath);
+    if (rolloutDate && (!latest || rolloutDate > latest)) latest = rolloutDate;
+  }
+  if (latest) active.add(latest);
+
+  return active;
+}
+
+function formatLocalDate(value) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 async function parseClaudeIncremental({
@@ -9437,6 +9540,7 @@ module.exports = {
   listRolloutFiles,
   listRolloutFilesDeep,
   codexSessionIdFromPath,
+  filterColdCodexRolloutFiles,
   listClaudeProjectFiles,
   listGeminiSessionFiles,
   listOpencodeMessageFiles,

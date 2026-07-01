@@ -4,7 +4,11 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const { test } = require("node:test");
 
-const { cmdSync, scheduleAutoRetry } = require("../src/commands/sync");
+const {
+  cmdSync,
+  isCodexColdScanAuditDue,
+  scheduleAutoRetry,
+} = require("../src/commands/sync");
 const { listRolloutFiles } = require("../src/lib/rollout");
 
 function tokenCountLine({ ts, last, total }) {
@@ -103,6 +107,21 @@ async function countReaddir(fn, predicate = () => true) {
     return { count, value };
   } finally {
     fs.readdir = realReaddir;
+  }
+}
+
+async function countStat(fn, predicate = () => true) {
+  const realStat = fs.stat;
+  let count = 0;
+  fs.stat = async function countedStat(target, ...args) {
+    if (predicate(String(target))) count += 1;
+    return realStat.call(this, target, ...args);
+  };
+  try {
+    const value = await fn();
+    return { count, value };
+  } finally {
+    fs.stat = realStat;
   }
 }
 
@@ -494,6 +513,107 @@ test("full auto sync persists Codex day inventory cache between runs", async () 
     );
     assert.equal(count, 0, "unchanged cached day should not be readdir'd on the next full auto sync");
   });
+});
+
+test("full auto sync cold-skips historical Codex rollout file stats after audit baseline", async () => {
+  await withTempSyncEnv(async (home) => {
+    const codexHome = process.env.CODEX_HOME;
+    const rolloutPath = await writeCodexRollout(
+      codexHome,
+      "2026-01-01",
+      "019f16bd-aaaa-7000-8000-aaaaaaaaaaaa",
+      29,
+    );
+    await writeCodexRollout(
+      codexHome,
+      "2026-07-02",
+      "019f16bd-bbbb-7000-8000-bbbbbbbbbbbb",
+      31,
+    );
+
+    await cmdSync(["--auto"]);
+    const { count } = await countStat(
+      () => cmdSync(["--auto"]),
+      (target) => target === rolloutPath,
+    );
+
+    assert.equal(count, 0, "historical EOF Codex rollout should not be stat'ed on idle sync");
+    const cursors = JSON.parse(
+      await fs.readFile(path.join(home, ".tokentracker", "tracker", "cursors.json"), "utf8"),
+    );
+    assert.equal(cursors.codexColdScanAudit.lastSkippedFiles, 1);
+  });
+});
+
+test("manual sync still stats historical Codex rollouts after auto cold-skip baseline", async () => {
+  await withTempSyncEnv(async (home) => {
+    const codexHome = process.env.CODEX_HOME;
+    const rolloutPath = await writeCodexRollout(
+      codexHome,
+      "2026-01-01",
+      "019f16bd-cccc-7000-8000-cccccccccccc",
+      37,
+    );
+    await writeCodexRollout(
+      codexHome,
+      "2026-07-02",
+      "019f16bd-dddd-7000-8000-dddddddddddd",
+      41,
+    );
+
+    await cmdSync(["--auto"]);
+    const { count } = await countStat(
+      () => cmdSync([]),
+      (target) => target === rolloutPath,
+    );
+
+    assert.ok(count > 0, "manual full sync should keep historical file validation");
+  });
+});
+
+test("Codex cold scan audit treats future full-scan timestamps as due", () => {
+  const nowMs = Date.UTC(2026, 6, 2, 0, 0, 0);
+
+  assert.equal(
+    isCodexColdScanAuditDue({
+      codexColdScanAudit: {
+        version: 1,
+        lastFullScanAtMs: nowMs + 10 * 60 * 1000,
+        syncsSinceFullScan: 0,
+      },
+    }, nowMs),
+    true,
+  );
+  assert.equal(
+    isCodexColdScanAuditDue({
+      codexColdScanAudit: {
+        version: 1,
+        lastFullScanAtMs: nowMs - 60 * 60 * 1000,
+        syncsSinceFullScan: 0,
+      },
+    }, nowMs),
+    false,
+  );
+  assert.equal(
+    isCodexColdScanAuditDue({
+      codexColdScanAudit: {
+        version: 1,
+        lastFullScanAtMs: nowMs - 25 * 60 * 60 * 1000,
+        syncsSinceFullScan: 0,
+      },
+    }, nowMs),
+    true,
+  );
+  assert.equal(
+    isCodexColdScanAuditDue({
+      codexColdScanAudit: {
+        version: 1,
+        lastFullScanAtMs: nowMs - 60 * 60 * 1000,
+        syncsSinceFullScan: 288,
+      },
+    }, nowMs),
+    true,
+  );
 });
 
 test("Codex day inventory cache reduces repeated old-day readdir", async () => {

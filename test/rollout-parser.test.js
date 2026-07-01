@@ -44,6 +44,7 @@ const {
   resolveKimiCodeWireFiles,
   resolveKimiCodeDefaultModel,
   listRolloutFilesDeep,
+  filterColdCodexRolloutFiles,
 } = require("../src/lib/rollout");
 
 const antigravityTestTokens = (text) => estimateAntigravityTokens(text || "");
@@ -941,6 +942,117 @@ test("parseRolloutIncremental keeps project EOF fast path scoped to codex source
     assert.equal(second.filesProcessed, 1);
     assert.equal(second.eventsAggregated, 0);
     assert.equal(cursors.files[rolloutPath].projectOffset, undefined);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("filterColdCodexRolloutFiles skips historical EOF Codex files without statting them", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  const realStat = fs.stat;
+  try {
+    const oldPath = path.join(
+      tmp,
+      ".codex",
+      "sessions",
+      "2026",
+      "01",
+      "01",
+      "rollout-2026-01-01T00-00-00-019f16bd-1111-7222-8333-444444444444.jsonl",
+    );
+    const recentPath = path.join(
+      tmp,
+      ".codex",
+      "sessions",
+      "2026",
+      "07",
+      "02",
+      "rollout-2026-07-02T00-00-00-019f16bd-2222-7333-8444-555555555555.jsonl",
+    );
+    const otherSourcePath = path.join(
+      tmp,
+      ".code",
+      "sessions",
+      "rollout-2026-01-01T00-00-00-019f16bd-3333-7444-8555-666666666666.jsonl",
+    );
+    let rolloutStats = 0;
+    fs.stat = async function countedStat(target, ...args) {
+      if (String(target).endsWith(".jsonl")) rolloutStats += 1;
+      return realStat.call(this, target, ...args);
+    };
+
+    const filtered = await filterColdCodexRolloutFiles({
+      rolloutFiles: [
+        { path: oldPath, source: "codex" },
+        { path: recentPath, source: "codex" },
+        { path: otherSourcePath, source: "every-code" },
+      ],
+      cursors: {
+        files: {
+          [oldPath]: { offset: 123, projectOffset: 123 },
+          [recentPath]: { offset: 123, projectOffset: 123 },
+          [otherSourcePath]: { offset: 123 },
+        },
+      },
+      projectEnabled: false,
+      nowMs: Date.UTC(2026, 6, 2),
+    });
+
+    assert.equal(filtered.skipped, 1);
+    assert.deepEqual(
+      filtered.rolloutFiles.map((entry) => entry.path),
+      [recentPath, otherSourcePath],
+    );
+    assert.equal(rolloutStats, 0);
+  } finally {
+    fs.stat = realStat;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("filterColdCodexRolloutFiles keeps project-stale historical files parseable", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    const configPath = path.join(repoRoot, ".git", "config");
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(
+      configPath,
+      `[remote "origin"]\n\turl = https://github.com/acme/changed.git\n`,
+      "utf8",
+    );
+    const configStat = await fs.stat(configPath);
+    const rolloutPath = path.join(
+      tmp,
+      ".codex",
+      "sessions",
+      "2026",
+      "01",
+      "01",
+      "rollout-2026-01-01T00-00-00-019f16bd-4444-7555-8666-777777777777.jsonl",
+    );
+
+    const filtered = await filterColdCodexRolloutFiles({
+      rolloutFiles: [{ path: rolloutPath, source: "codex" }],
+      cursors: {
+        files: {
+          [rolloutPath]: {
+            offset: 123,
+            projectOffset: 123,
+            projectFileContext: {
+              configPath,
+              configMtimeMs: configStat.mtimeMs - 1,
+              configSize: configStat.size,
+            },
+          },
+        },
+      },
+      projectEnabled: true,
+      nowMs: Date.UTC(2026, 6, 2),
+    });
+
+    assert.equal(filtered.skipped, 0);
+    assert.deepEqual(filtered.rolloutFiles, [{ path: rolloutPath, source: "codex" }]);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
