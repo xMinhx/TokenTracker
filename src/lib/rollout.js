@@ -13,6 +13,7 @@ const BUCKET_SEPARATOR = "|";
 const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
 const CLAUDE_MEM_OBSERVER_PROJECT_REF =
   "https://local.tokentracker/claude-mem/observer-sessions";
+const PROJECT_ABSENT_CONTEXT_RESCAN_MS = 24 * 60 * 60 * 1000;
 
 async function listRolloutFiles(sessionsDir, options = {}) {
   const out = [];
@@ -181,6 +182,8 @@ async function parseRolloutIncremental({
   const projectTouchedBuckets = projectEnabled ? new Set() : null;
   const projectMetaCache = projectEnabled ? new Map() : null;
   const publicRepoCache = projectEnabled ? new Map() : null;
+  const projectFreshnessCache = projectEnabled ? new Map() : null;
+  const projectFreshnessNowMs = Date.now();
   const touchedBuckets = new Set();
   const defaultSource = normalizeSourceInput(source) || DEFAULT_SOURCE;
 
@@ -222,7 +225,10 @@ async function parseRolloutIncremental({
       codexProjectFastPath &&
       typeof publicRepoResolver !== "function" &&
       projectOffset >= st.size &&
-      (await isProjectFileContextFresh(prev?.projectFileContext));
+      (await isProjectFileContextFresh(prev?.projectFileContext, {
+        freshnessCache: projectFreshnessCache,
+        nowMs: projectFreshnessNowMs,
+      }));
     const projectContextOnlyScan =
       codexProjectFastPath &&
       typeof publicRepoResolver !== "function" &&
@@ -303,7 +309,10 @@ async function parseRolloutIncremental({
     };
     if (codexProjectFastPath) {
       nextCursor.projectOffset = result.endOffset;
-      nextCursor.projectFileContext = buildProjectFileContext(result.projectFileContexts);
+      nextCursor.projectFileContext = buildProjectFileContext(
+        result.projectFileContexts,
+        projectFreshnessNowMs,
+      );
     } else if (Number.isFinite(prev?.projectOffset)) {
       nextCursor.projectOffset = prev.projectOffset;
       if (prev?.projectFileContext) nextCursor.projectFileContext = prev.projectFileContext;
@@ -2198,7 +2207,7 @@ function addProjectFileContext(contexts, projectContext) {
   contexts.push(projectContext);
 }
 
-function buildProjectFileContext(projectContexts) {
+function buildProjectFileContext(projectContexts, checkedAtMs = Date.now()) {
   const contexts = Array.isArray(projectContexts)
     ? projectContexts
     : projectContexts && typeof projectContexts === "object"
@@ -2217,7 +2226,7 @@ function buildProjectFileContext(projectContexts) {
       configSize: Number.isFinite(context.configSize) ? context.configSize : null,
     });
   }
-  if (configs.length === 0) return { absent: true };
+  if (configs.length === 0) return { absent: true, checkedAtMs };
   if (configs.length > 1) return { configs };
   const [config] = configs;
   return {
@@ -2226,24 +2235,41 @@ function buildProjectFileContext(projectContexts) {
   };
 }
 
-async function isProjectFileContextFresh(projectFileContext) {
+async function isProjectFileContextFresh(projectFileContext, options = {}) {
   if (!projectFileContext || typeof projectFileContext !== "object") return false;
-  if (projectFileContext.absent === true) return false;
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+  const absentTtlMs = Number.isFinite(options.absentTtlMs)
+    ? options.absentTtlMs
+    : PROJECT_ABSENT_CONTEXT_RESCAN_MS;
+  const freshnessCache =
+    options.freshnessCache && typeof options.freshnessCache === "object"
+      ? options.freshnessCache
+      : null;
+  if (projectFileContext.absent === true) {
+    const checkedAtMs = Number(projectFileContext.checkedAtMs);
+    return Number.isFinite(checkedAtMs) && checkedAtMs > 0 && nowMs - checkedAtMs < absentTtlMs;
+  }
   if (Array.isArray(projectFileContext.configs)) {
     if (projectFileContext.configs.length === 0) return false;
     for (const config of projectFileContext.configs) {
-      if (!(await isSingleProjectConfigFresh(config))) return false;
+      if (!(await isSingleProjectConfigFresh(config, freshnessCache))) return false;
     }
     return true;
   }
-  return isSingleProjectConfigFresh(projectFileContext);
+  return isSingleProjectConfigFresh(projectFileContext, freshnessCache);
 }
 
-async function isSingleProjectConfigFresh(projectFileContext) {
+async function isSingleProjectConfigFresh(projectFileContext, freshnessCache = null) {
   const configPath =
     typeof projectFileContext.configPath === "string" ? projectFileContext.configPath : null;
   if (!configPath) return false;
-  const st = await fs.stat(configPath).catch(() => null);
+  let st;
+  if (freshnessCache && freshnessCache.has(configPath)) {
+    st = freshnessCache.get(configPath);
+  } else {
+    st = await fs.stat(configPath).catch(() => null);
+    if (freshnessCache) freshnessCache.set(configPath, st);
+  }
   if (!st || !st.isFile()) return false;
   return (
     st.mtimeMs === projectFileContext.configMtimeMs &&

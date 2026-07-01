@@ -762,7 +762,7 @@ test("parseRolloutIncremental does not skip unchanged project files with a custo
   }
 });
 
-test("parseRolloutIncremental keeps probing unchanged files after missing project context", async () => {
+test("parseRolloutIncremental throttles unchanged files after missing project context", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
   try {
     const repoRoot = path.join(tmp, "repo");
@@ -795,6 +795,7 @@ test("parseRolloutIncremental keeps probing unchanged files after missing projec
     });
     assert.equal(first.filesProcessed, 1);
     assert.equal(cursors.files[rolloutPath].projectFileContext.absent, true);
+    assert.equal(typeof cursors.files[rolloutPath].projectFileContext.checkedAtMs, "number");
 
     await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
     await fs.writeFile(
@@ -809,10 +810,85 @@ test("parseRolloutIncremental keeps probing unchanged files after missing projec
       queuePath,
       projectQueuePath,
     });
-    assert.equal(second.filesProcessed, 1);
+    assert.equal(second.filesProcessed, 0);
     assert.equal(second.eventsAggregated, 0);
+    assert.equal(cursors.files[rolloutPath].projectFileContext.absent, true);
+
+    cursors.files[rolloutPath].projectFileContext.checkedAtMs = 1;
+    const third = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(third.filesProcessed, 1);
+    assert.equal(third.eventsAggregated, 0);
     assert.equal(cursors.files[rolloutPath].projectFileContext.configPath.endsWith("config"), true);
   } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental memoizes project config freshness during idle scans", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  const realStat = fs.stat;
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    const configPath = path.join(repoRoot, ".git", "config");
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(
+      configPath,
+      `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+      "utf8",
+    );
+    const sessionsDir = path.join(tmp, ".codex", "sessions", "2026", "01", "26");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    const rolloutFiles = [];
+    for (let i = 0; i < 3; i += 1) {
+      const rolloutPath = path.join(sessionsDir, `rollout-test-${i}.jsonl`);
+      rolloutFiles.push(rolloutPath);
+      await fs.writeFile(
+        rolloutPath,
+        [
+          buildTurnContextLine({ model: "gpt-4", cwd: repoRoot }),
+          buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+    }
+
+    await parseRolloutIncremental({
+      rolloutFiles,
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+
+    let configStats = 0;
+    fs.stat = async function countedStat(target, ...args) {
+      if (String(target) === configPath) configStats += 1;
+      return realStat.call(this, target, ...args);
+    };
+    const second = await parseRolloutIncremental({
+      rolloutFiles,
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(second.filesProcessed, 0);
+    assert.equal(configStats, 1);
+  } finally {
+    fs.stat = realStat;
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
