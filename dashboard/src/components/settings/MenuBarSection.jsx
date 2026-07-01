@@ -1,6 +1,9 @@
 import React from "react";
 import { Activity, Download, RefreshCw } from "lucide-react";
 import { useNativeSettings } from "../../hooks/use-native-settings.js";
+import { useLocale } from "../../hooks/useLocale.js";
+import { ConfirmModal } from "../../ui/components";
+import { showToast } from "../../ui/components/Toast.jsx";
 import { STATUSPAGE_URL } from "../../lib/config";
 import { copy } from "../../lib/copy";
 import { cn } from "../../lib/cn";
@@ -68,35 +71,122 @@ export function MenuBarSection() {
   );
 }
 
+function hasUpdate(current, latest) {
+  const parseParts = (v) => v.replace(/^v/, "").split(".").map(Number);
+  const currParts = parseParts(current);
+  const lateParts = parseParts(latest);
+  for (let i = 0; i < Math.max(currParts.length, lateParts.length); i++) {
+    const curr = currParts[i] || 0;
+    const late = lateParts[i] || 0;
+    if (late > curr) return true;
+    if (late < curr) return false;
+  }
+  return false;
+}
+
 export function NativeAppFooter() {
   const { available, settings, runAction } = useNativeSettings();
   const showNativeInfo = available && settings?.version;
+  const [checking, setChecking] = React.useState(false);
+  const [updateModal, setUpdateModal] = React.useState({
+    open: false,
+    latestVersion: "",
+    htmlUrl: "",
+  });
+  const { resolvedLocale } = useLocale();
+  const isZh = resolvedLocale?.startsWith("zh");
+  const currentVersion = import.meta.env.VITE_APP_VERSION || "0.64.2";
+
+  const handleCheckUpdates = async () => {
+    setChecking(true);
+    try {
+      const res = await fetch("https://api.github.com/repos/mm7894215/TokenTracker/releases/latest");
+      if (!res.ok) throw new Error("Failed to fetch");
+      const data = await res.json();
+      const latestVersion = data.tag_name;
+
+      if (hasUpdate(currentVersion, latestVersion)) {
+        setUpdateModal({
+          open: true,
+          latestVersion,
+          htmlUrl: data.html_url
+        });
+      } else {
+        showToast({
+          title: isZh ? "已是最新版本" : "You are up to date!",
+        });
+      }
+    } catch (err) {
+      console.error("Check updates failed:", err);
+      showToast({
+        title: isZh ? "检查更新失败，请重试" : "Failed to check for updates. Please try again.",
+      });
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const modalTitle = isZh ? "发现新版本" : "Update Available";
+  const modalDescription = isZh 
+    ? `发现新版本 ${updateModal.latestVersion}。是否前往 GitHub 查看并下载？` 
+    : `A new version ${updateModal.latestVersion} is available. Would you like to view and download it on GitHub?`;
+  const modalConfirm = isZh ? "前往下载" : "Download";
+  const modalCancel = isZh ? "取消" : "Cancel";
 
   return (
-    <div className="mt-6 flex flex-wrap items-center justify-center gap-2 text-xs text-oai-gray-500 dark:text-oai-gray-500">
-      {showNativeInfo ? (
-        <>
-          <span>TokenTrackerBar v{settings.version}</span>
-          <span aria-hidden>·</span>
-          <button
-            type="button"
-            onClick={() => runAction("openAbout")}
-            className="underline-offset-2 transition-colors hover:text-oai-gray-700 hover:underline dark:hover:text-oai-gray-300"
-          >
-            GitHub
-          </button>
-          <span aria-hidden>·</span>
-        </>
-      ) : null}
-      <a
-        href={STATUSPAGE_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center gap-1.5 underline-offset-2 transition-colors hover:text-oai-gray-700 hover:underline dark:hover:text-oai-gray-300"
-      >
-        <Activity className="h-3.5 w-3.5" aria-hidden />
-        {copy("settings.footer.statusPage")}
-      </a>
+    <div className="mt-6 flex flex-col items-center justify-center gap-4 text-xs text-oai-gray-500 dark:text-oai-gray-500">
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {showNativeInfo ? (
+          <>
+            <span>TokenTrackerBar v{settings.version} (Core v{currentVersion})</span>
+            <span aria-hidden>·</span>
+            <button
+              type="button"
+              onClick={() => runAction("openAbout")}
+              className="underline-offset-2 transition-colors hover:text-oai-gray-700 hover:underline dark:hover:text-oai-gray-300"
+            >
+              GitHub
+            </button>
+            <span aria-hidden>·</span>
+          </>
+        ) : (
+          <>
+            <span>TokenTracker v{currentVersion}</span>
+            <span aria-hidden>·</span>
+            <button
+              type="button"
+              onClick={handleCheckUpdates}
+              disabled={checking}
+              className="underline-offset-2 transition-colors hover:text-oai-gray-700 hover:underline dark:hover:text-oai-gray-300 disabled:opacity-50"
+            >
+              {checking ? (isZh ? "正在检测..." : "Checking...") : copy("settings.menubar.checkUpdates")}
+            </button>
+            <span aria-hidden>·</span>
+          </>
+        )}
+        <a
+          href={STATUSPAGE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 underline-offset-2 transition-colors hover:text-oai-gray-700 hover:underline dark:hover:text-oai-gray-300"
+        >
+          <Activity className="h-3.5 w-3.5" aria-hidden />
+          {copy("settings.footer.statusPage")}
+        </a>
+      </div>
+
+      <ConfirmModal
+        open={updateModal.open}
+        title={modalTitle}
+        description={modalDescription}
+        confirmLabel={modalConfirm}
+        cancelLabel={modalCancel}
+        onConfirm={() => {
+          window.open(updateModal.htmlUrl, "_blank");
+          setUpdateModal((prev) => ({ ...prev, open: false }));
+        }}
+        onCancel={() => setUpdateModal((prev) => ({ ...prev, open: false }))}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@ const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
+const pkg = require("../../package.json");
 
 const { readJson } = require("../lib/fs");
 const { readCodexNotify, readEveryCodeNotify } = require("../lib/codex-config");
@@ -325,6 +326,7 @@ async function cmdStatus(argv = []) {
 
   if (opts.json || opts.light) {
     const summary = {
+      version: pkg.version,
       generated_at: new Date().toISOString(),
       base_url: config?.baseUrl || null,
       device_token_set: Boolean(config?.deviceToken),
@@ -439,6 +441,7 @@ async function cmdStatus(argv = []) {
 
   process.stdout.write(
     [
+      `TokenTracker v${pkg.version}`,
       "Status:",
       `- Base URL: ${config?.baseUrl || "unset"}`,
       `- Device token: ${config?.deviceToken ? "set" : "unset"}`,
@@ -633,6 +636,7 @@ function renderLightTable(summary) {
   const rows = [];
   const push = (k, v) => rows.push([k, v == null || v === "" ? "—" : String(v)]);
 
+  push("Version", summary.version);
   push("Base URL", summary.base_url);
   push("Device token", summary.device_token_set ? "set" : "unset");
   push("Queue pending (bytes)", summary.queue.pending_bytes);

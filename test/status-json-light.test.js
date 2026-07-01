@@ -27,6 +27,7 @@ test("status --json emits a JSON object with required summary fields", () => {
   const res = runStatus(["--json"]);
   assert.equal(res.status, 0, `exit code: ${res.status} stderr=${res.stderr}`);
   const parsed = JSON.parse(res.stdout);
+  assert.ok("version" in parsed, "missing top-level key: version");
   for (const key of [
     "generated_at",
     "base_url",
@@ -52,7 +53,8 @@ test("status --light renders an ASCII table with key columns", () => {
   const sepCount = (res.stdout.match(/^\+-+\+-+\+$/gm) || []).length;
   assert.ok(sepCount >= 3, `expected ≥3 separator lines, got ${sepCount}`);
   // No ANSI / emoji / spinner artifacts
-  assert.ok(!/\[/.test(res.stdout), "ANSI escapes leaked");
+  assert.ok(!/ \[/.test(res.stdout), "ANSI escapes leaked");
+  assert.match(res.stdout, /^\| Version/m);
   assert.match(res.stdout, /^\| Key /m);
   assert.match(res.stdout, /^\| Queue pending/m);
   assert.match(res.stdout, /^\| Hook · claude/m);
@@ -70,7 +72,8 @@ test("status --diagnostics still emits raw diagnostics JSON (back-compat)", () =
 test("status default (no flag) still prints the human-readable list", () => {
   const res = runStatus([]);
   assert.equal(res.status, 0);
-  assert.match(res.stdout, /^Status:/);
+  assert.match(res.stdout, /^TokenTracker v/);
+  assert.match(res.stdout, /Status:/);
   assert.match(res.stdout, /^- Queue: \d+ bytes pending/m);
 });
 
