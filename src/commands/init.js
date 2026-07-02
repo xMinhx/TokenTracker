@@ -992,10 +992,11 @@ try {
     try { fs.writeFileSync(throttlePath, String(now), 'utf8'); } catch (_) {}
     const hasLocalRuntime = fs.existsSync(trackerBinPath);
     const hasLocalDeps = fs.existsSync(depsMarkerPath);
+    const syncArgs = ['sync', '--auto', '--from-notify', '--source', source];
     if (hasLocalRuntime && hasLocalDeps) {
-      spawnDetached([process.execPath, trackerBinPath, 'sync', '--auto', '--from-notify']);
+      spawnDetached([process.execPath, trackerBinPath, ...syncArgs]);
     } else {
-      spawnDetached(['npx', '--yes', fallbackPkg, 'sync', '--auto', '--from-notify']);
+      spawnDetached(['npx', '--yes', fallbackPkg, ...syncArgs]);
     }
   }
 } catch (_) {}

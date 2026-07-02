@@ -10,6 +10,7 @@ const {
   listRolloutFiles,
   listRolloutFilesDeep,
   codexSessionIdFromPath,
+  filterColdCodexRolloutFiles,
   listClaudeProjectFiles,
   listGeminiSessionFiles,
   listOpencodeMessageFiles,
@@ -152,11 +153,50 @@ const CLOUD_CONVERSATIONS_BACKFILL_KEY = "cloudConversationsBackfill_2026_06";
 // would lose that history (ref the v6 ground-truth-repair data-loss incident).
 const CODEX_RESCAN_DEDUP_REPAIR_KEY = "codexRescanDedupRepair_2026_06";
 const DROID_DUP_SESSION_REPAIR_KEY = "droidDupSessionInflationRepair_2026_06";
+const CODEX_COLD_SCAN_AUDIT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const CODEX_COLD_SCAN_AUDIT_MAX_SYNCS = 288;
 // 0.57.0 mis-attributed mimocode's mirrored Claude/claude-mem history to
 // source=mimo (read the whole DB instead of only providerID=mimo rows). This
 // one-time repair purges all source=mimo data from the local queues + cursor
 // state so the next sync (providerID-filtered reader) rebuilds it correctly.
 const MIMO_PROVIDER_REPAIR_KEY = "mimoClaudeMislabelRepair_2026_06";
+const AUTO_SYNC_SOURCE_ALIASES = new Map([
+  ["code", "every-code"],
+  ["everycode", "every-code"],
+  ["kilo", "kilo-cli"],
+  ["kilo-code", "kilocode"],
+  ["kimi_code", "kimi-code"],
+  ["roo-code", "roocode"],
+]);
+const AUTO_SYNC_SOURCES = new Set([
+  "antigravity",
+  "claude",
+  "codebuddy",
+  "codex",
+  "copilot",
+  "craft",
+  "cursor",
+  "droid",
+  "every-code",
+  "gemini",
+  "goose",
+  "grok",
+  "hermes",
+  "kilo-cli",
+  "kilocode",
+  "kiro",
+  "kimi",
+  "kimi-code",
+  "mimo",
+  "omp",
+  "opencode",
+  "openclaw",
+  "pi",
+  "roocode",
+  "workbuddy",
+  "zcode",
+  "zed",
+]);
 
 function warnProviderParseFailure(label, err, opts) {
   if (opts?.auto) return;
@@ -218,48 +258,88 @@ async function cmdSync(argv) {
     const mimoHome = process.env.MIMO_HOME || path.join(xdgDataHome, "mimocode");
     const zcodeHome = process.env.ZCODE_HOME || path.join(home, ".zcode");
 
-    // OpenClaw session plugin integration: allow the plugin to request incremental parsing for a single session jsonl.
-    // We still parse all regular sources so model/source attribution stays complete (e.g. Kimi sessions).
+    // OpenClaw session plugin integration: lifecycle hooks request an
+    // OpenClaw-only auto sync so unrelated providers do not get walked.
     const openclawSignal = opts.fromOpenclaw
       ? resolveOpenclawSignal({ home, env: process.env })
       : null;
 
-    const sources = [
-      { source: "codex", sessionsDir: path.join(codexHome, "sessions") },
-      // Codex-Manager archives sessions to ~/.codex/archived_sessions/ on every
-      // account/channel switch (issue #187). Scanning it too keeps that usage
-      // counted instead of orphaning it in the cloud (a re-upload's upsert can
-      // never delete cloud rows whose local source file has vanished). Safe
-      // against double-counting: the codex event dedup keys on sessionUUID (in
-      // the filename) + event timestamp, both stable across a sessions/ ->
-      // archived_sessions/ move, so re-reading an archived copy is a no-op.
-      { source: "codex", sessionsDir: path.join(codexHome, "archived_sessions"), deep: true },
-      { source: "every-code", sessionsDir: path.join(codeHome, "sessions") },
-    ];
+    const autoSourceScope = resolveAutoSourceScope(opts);
+    const isFullSourceScan = !autoSourceScope;
+    const sourceAllowed = (...sources) =>
+      !autoSourceScope || sources.includes(autoSourceScope);
+
+    const sources = [];
+    if (sourceAllowed("codex")) {
+      sources.push(
+        { source: "codex", sessionsDir: path.join(codexHome, "sessions"), codexInventoryCache: true },
+        // Codex-Manager archives sessions to ~/.codex/archived_sessions/ on every
+        // account/channel switch (issue #187). Scanning it too keeps that usage
+        // counted instead of orphaning it in the cloud (a re-upload's upsert can
+        // never delete cloud rows whose local source file has vanished). Safe
+        // against double-counting: the codex event dedup keys on sessionUUID (in
+        // the filename) + event timestamp, both stable across a sessions/ ->
+        // archived_sessions/ move, so re-reading an archived copy is a no-op.
+        { source: "codex", sessionsDir: path.join(codexHome, "archived_sessions"), deep: true },
+      );
+    }
+    if (sourceAllowed("every-code")) {
+      sources.push({ source: "every-code", sessionsDir: path.join(codeHome, "sessions") });
+    }
 
     const rolloutFiles = [];
     const seenSessions = new Set();
+    const codexDayInventoryCache =
+      cursors.codexDayInventoryCache && typeof cursors.codexDayInventoryCache === "object"
+        ? cursors.codexDayInventoryCache
+        : { version: 1, days: {} };
+    if (sourceAllowed("codex")) cursors.codexDayInventoryCache = codexDayInventoryCache;
     for (const entry of sources) {
       if (seenSessions.has(entry.sessionsDir)) continue;
       seenSessions.add(entry.sessionsDir);
       const files = entry.deep
         ? await listRolloutFilesDeep(entry.sessionsDir)
-        : await listRolloutFiles(entry.sessionsDir);
+        : await listRolloutFiles(entry.sessionsDir, entry.codexInventoryCache
+          ? { dayInventoryCache: codexDayInventoryCache }
+          : undefined);
       for (const filePath of files) {
         rolloutFiles.push({ path: filePath, source: entry.source });
       }
     }
 
-    await migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles });
-    await repairCodexRescanInflation({ cursors, queuePath, queueStatePath, rolloutFiles });
-    await repairDroidDuplicateSessionInflation({ cursors, queuePath, queueStatePath });
-    await repairMimoClaudeMislabel({
-      cursors,
-      queuePath,
-      queueStatePath,
-      projectQueuePath,
-      projectQueueStatePath,
-    });
+    if (isFullSourceScan) {
+      await migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles });
+      await repairCodexRescanInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+        rolloutFiles,
+      });
+      await repairDroidDuplicateSessionInflation({ cursors, queuePath, queueStatePath });
+      await repairMimoClaudeMislabel({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+      });
+    }
+
+    const codexColdSkipEnabled = opts.auto && isFullSourceScan && sourceAllowed("codex");
+    const codexColdAuditDue = codexColdSkipEnabled
+      ? isCodexColdScanAuditDue(cursors)
+      : false;
+    const codexColdFilter = codexColdSkipEnabled
+      ? await filterColdCodexRolloutFiles({
+          rolloutFiles,
+          cursors,
+          projectEnabled: true,
+          auditDue: codexColdAuditDue,
+        })
+      : { rolloutFiles, skipped: 0 };
+    const rolloutFilesForParse = codexColdFilter.rolloutFiles;
 
     const openclawFiles = openclawSignal?.sessionFile
       ? [{ path: openclawSignal.sessionFile, source: "openclaw" }]
@@ -267,14 +347,15 @@ async function cmdSync(argv) {
 
     if (progress?.enabled) {
       progress.start(
-        `Parsing ${renderBar(0)} 0/${formatNumber(rolloutFiles.length)} files | buckets 0`,
+        `Parsing ${renderBar(0)} 0/${formatNumber(rolloutFilesForParse.length)} files | buckets 0`,
       );
     }
 
     let parseResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    let codexParseSucceeded = false;
     try {
       parseResult = await parseRolloutIncremental({
-        rolloutFiles,
+        rolloutFiles: rolloutFilesForParse,
         cursors,
         queuePath,
         projectQueuePath,
@@ -288,12 +369,19 @@ async function cmdSync(argv) {
           );
         },
       });
+      codexParseSucceeded = true;
     } catch (err) {
       warnProviderParseFailure("Codex", err, opts);
     }
+    if (codexColdSkipEnabled && codexParseSucceeded) {
+      recordCodexColdScanAudit(cursors, {
+        fullAudit: codexColdAuditDue,
+        skipped: codexColdFilter.skipped,
+      });
+    }
 
     let openclawResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (openclawFiles.length > 0) {
+    if (sourceAllowed("openclaw") && openclawFiles.length > 0) {
       // Only runs when explicitly triggered by the OpenClaw session plugin.
       try {
         openclawResult = await parseOpenclawIncremental({
@@ -309,30 +397,34 @@ async function cmdSync(argv) {
     }
 
     let openclawFallback = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    try {
-      openclawFallback = await applyOpenclawTotalsFallback({
-        trackerDir,
-        signal: openclawSignal,
-        cursors,
-        queuePath,
-        projectQueuePath,
-      });
-    } catch (err) {
-      warnProviderParseFailure("OpenClaw", err, opts);
+    if (sourceAllowed("openclaw")) {
+      try {
+        openclawFallback = await applyOpenclawTotalsFallback({
+          trackerDir,
+          signal: openclawSignal,
+          cursors,
+          queuePath,
+          projectQueuePath,
+        });
+      } catch (err) {
+        warnProviderParseFailure("OpenClaw", err, opts);
+      }
     }
     openclawResult.filesProcessed += openclawFallback.filesProcessed;
     openclawResult.eventsAggregated += openclawFallback.eventsAggregated;
     openclawResult.bucketsQueued += openclawFallback.bucketsQueued;
 
-    const claudeFiles = await listClaudeProjectFiles(claudeProjectsDir);
-    await reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath, queueStatePath });
-    await repairClaudeQueueFromGroundTruth({
-      cursors,
-      queuePath,
-      queueStatePath,
-      projectQueuePath,
-      projectQueueStatePath,
-    });
+    const claudeFiles = sourceAllowed("claude") ? await listClaudeProjectFiles(claudeProjectsDir) : [];
+    if (isFullSourceScan) {
+      await reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath, queueStatePath });
+      await repairClaudeQueueFromGroundTruth({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+      });
+    }
     let claudeResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (claudeFiles.length > 0) {
       if (progress?.enabled) {
@@ -362,7 +454,7 @@ async function cmdSync(argv) {
       }
     }
 
-    const geminiFiles = await listGeminiSessionFiles(geminiTmpDir);
+    const geminiFiles = sourceAllowed("gemini") ? await listGeminiSessionFiles(geminiTmpDir) : [];
     let geminiResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (geminiFiles.length > 0) {
       if (progress?.enabled) {
@@ -392,7 +484,7 @@ async function cmdSync(argv) {
       }
     }
 
-    const antigravityFiles = await listAntigravityTranscripts(geminiHome);
+    const antigravityFiles = sourceAllowed("antigravity") ? await listAntigravityTranscripts(geminiHome) : [];
     let antigravityResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (antigravityFiles.length > 0) {
       if (progress?.enabled) {
@@ -422,7 +514,7 @@ async function cmdSync(argv) {
       }
     }
 
-    const opencodeFiles = await listOpencodeMessageFiles(opencodeStorageDir);
+    const opencodeFiles = sourceAllowed("opencode") ? await listOpencodeMessageFiles(opencodeStorageDir) : [];
     let opencodeResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (opencodeFiles.length > 0) {
       if (progress?.enabled) {
@@ -455,7 +547,7 @@ async function cmdSync(argv) {
     // OpenCode v1.2+ stores messages in SQLite (opencode.db) instead of JSON files.
     const opencodeDbPath = path.join(opencodeHome, "opencode.db");
     let opencodeDbResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const dbMessages = readOpencodeDbMessages(opencodeDbPath);
+    const dbMessages = sourceAllowed("opencode") ? readOpencodeDbMessages(opencodeDbPath) : [];
     if (dbMessages.length > 0) {
       if (progress?.enabled) {
         progress.start(
@@ -493,7 +585,7 @@ async function cmdSync(argv) {
     // the message indexes don't collide.
     const kiloDbPath = path.join(kiloHome, "kilo.db");
     let kiloResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const kiloDbMessages = readOpencodeDbMessages(kiloDbPath);
+    const kiloDbMessages = sourceAllowed("kilo-cli") ? readOpencodeDbMessages(kiloDbPath) : [];
     if (kiloDbMessages.length > 0) {
       if (progress?.enabled) {
         progress.start(
@@ -533,7 +625,7 @@ async function cmdSync(argv) {
     // double-count and mislabel Claude usage as mimo.
     const mimoDbPath = path.join(mimoHome, "mimocode.db");
     let mimoResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const mimoDbMessages = readMimoDbMessages(mimoDbPath);
+    const mimoDbMessages = sourceAllowed("mimo") ? readMimoDbMessages(mimoDbPath) : [];
     if (mimoDbMessages.length > 0) {
       if (progress?.enabled) {
         progress.start(
@@ -574,7 +666,7 @@ async function cmdSync(argv) {
     // would double-count.
     const zcodeDbPath = path.join(zcodeHome, "cli", "db", "db.sqlite");
     let zcodeResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const zcodeDbMessages = readZcodeDbMessages(zcodeDbPath);
+    const zcodeDbMessages = sourceAllowed("zcode") ? readZcodeDbMessages(zcodeDbPath) : [];
     if (zcodeDbMessages.length > 0) {
       if (progress?.enabled) {
         progress.start(
@@ -605,7 +697,7 @@ async function cmdSync(argv) {
     }
 
     // ── Kilo Code VS Code extension (Cline-style ui_messages.json) ──
-    const kilocodeTaskFiles = resolveKilocodeTaskFiles(process.env);
+    const kilocodeTaskFiles = sourceAllowed("kilocode") ? resolveKilocodeTaskFiles(process.env) : [];
     let kilocodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (kilocodeTaskFiles.length > 0) {
       if (progress?.enabled) {
@@ -636,7 +728,7 @@ async function cmdSync(argv) {
     // ── Goose (Block) — SQLite sessions with cumulative tokens per session ──
     const gooseDbPath = resolveGooseDbPath(process.env);
     let gooseResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (fssync.existsSync(gooseDbPath)) {
+    if (sourceAllowed("goose") && fssync.existsSync(gooseDbPath)) {
       if (progress?.enabled) {
         progress.start(`Parsing Goose ${renderBar(0)} 0 sessions | buckets 0`);
       }
@@ -661,7 +753,7 @@ async function cmdSync(argv) {
     }
 
     // ── Droid (Factory CLI) — passive reader for ~/.factory/sessions/*.settings.json ──
-    const droidSettingsFiles = listDroidSettingsFiles(process.env);
+    const droidSettingsFiles = sourceAllowed("droid") ? listDroidSettingsFiles(process.env) : [];
     let droidResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (droidSettingsFiles.length > 0) {
       if (progress?.enabled) {
@@ -696,7 +788,7 @@ async function cmdSync(argv) {
     // ── Zed Agent (all providers; cumulative-delta over SQLite threads) ──
     const zedDbPath = resolveZedDbPath(process.env);
     let zedResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (fssync.existsSync(zedDbPath)) {
+    if (sourceAllowed("zed") && fssync.existsSync(zedDbPath)) {
       if (progress?.enabled) {
         progress.start(`Parsing Zed Agent ${renderBar(0)} 0 threads | buckets 0`);
       }
@@ -721,7 +813,7 @@ async function cmdSync(argv) {
     }
 
     // ── Roo Code VS Code extension (Cline-derived; rooveterinaryinc.roo-cline) ──
-    const roocodeTaskFiles = resolveRoocodeTaskFiles(process.env);
+    const roocodeTaskFiles = sourceAllowed("roocode") ? resolveRoocodeTaskFiles(process.env) : [];
     let roocodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (roocodeTaskFiles.length > 0) {
       if (progress?.enabled) {
@@ -755,10 +847,12 @@ async function cmdSync(argv) {
     // cursor records under model="unknown". Purge those local buckets, emit
     // zero retractions so the cloud upserts overwrite them to zero, and reset
     // the incremental cursor so the fixed parser re-fetches all affected rows.
-    await migrateCursorUnknownBuckets({ cursors, queuePath });
+    if (isFullSourceScan) {
+      await migrateCursorUnknownBuckets({ cursors, queuePath });
+    }
 
     let cursorResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (isCursorInstalled({ home })) {
+    if (sourceAllowed("cursor") && isCursorInstalled({ home })) {
       const cursorAuth = extractCursorSessionToken({ home });
       if (cursorAuth) {
         try {
@@ -801,7 +895,7 @@ async function cmdSync(argv) {
     let kiroResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const kiroDbPath = resolveKiroDbPath();
     const kiroJsonlPath = resolveKiroJsonlPath();
-    if (fssync.existsSync(kiroDbPath) || fssync.existsSync(kiroJsonlPath)) {
+    if (sourceAllowed("kiro") && (fssync.existsSync(kiroDbPath) || fssync.existsSync(kiroJsonlPath))) {
       if (progress?.enabled) {
         progress.start(`Parsing Kiro ${renderBar(0)} | buckets 0`);
       }
@@ -827,7 +921,7 @@ async function cmdSync(argv) {
     // ── Hermes Agent (SQLite-based) ──
     let hermesResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const hermesPath = resolveHermesPath();
-    if (fssync.existsSync(hermesPath)) {
+    if (sourceAllowed("hermes") && fssync.existsSync(hermesPath)) {
       if (progress?.enabled) {
         progress.start(`Parsing Hermes ${renderBar(0)} | buckets 0`);
       }
@@ -858,8 +952,8 @@ async function cmdSync(argv) {
     // 4 chars/token from user prompt chars and assistant response chars.
     let kiroCliResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const kiroCliDb = resolveKiroCliDbPath(process.env);
-    const kiroCliSessionFiles = resolveKiroCliSessionFiles(process.env);
-    if (fssync.existsSync(kiroCliDb) || kiroCliSessionFiles.length > 0) {
+    const kiroCliSessionFiles = sourceAllowed("kiro") ? resolveKiroCliSessionFiles(process.env) : [];
+    if (sourceAllowed("kiro") && (fssync.existsSync(kiroCliDb) || kiroCliSessionFiles.length > 0)) {
       if (progress?.enabled) {
         progress.start(`Parsing Kiro CLI ${renderBar(0)} | buckets 0`);
       }
@@ -885,7 +979,7 @@ async function cmdSync(argv) {
 
     // ── Kimi (passive wire.jsonl reader) ──
     let kimiResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const kimiWireFiles = resolveKimiWireFiles(process.env);
+    const kimiWireFiles = sourceAllowed("kimi") ? resolveKimiWireFiles(process.env) : [];
     if (kimiWireFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Kimi Code ${renderBar(0)} | buckets 0`);
@@ -911,7 +1005,7 @@ async function cmdSync(argv) {
 
     // ── Kimi Code official (@moonshot-ai/kimi-code, ~/.kimi-code) ──
     let kimiCodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const kimiCodeWireFiles = resolveKimiCodeWireFiles(process.env);
+    const kimiCodeWireFiles = sourceAllowed("kimi-code") ? resolveKimiCodeWireFiles(process.env) : [];
     if (kimiCodeWireFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Kimi Code (official) ${renderBar(0)} | buckets 0`);
@@ -939,7 +1033,7 @@ async function cmdSync(argv) {
     // Tencent's CodeBuddy CLI is a Claude Code clone; no hook system, so we
     // tail the per-session JSONL conversation logs incrementally on each sync.
     let codebuddyResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const codebuddyFiles = resolveCodebuddyProjectFiles(process.env);
+    const codebuddyFiles = sourceAllowed("codebuddy") ? resolveCodebuddyProjectFiles(process.env) : [];
     if (codebuddyFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing CodeBuddy ${renderBar(0)} | buckets 0`);
@@ -969,7 +1063,7 @@ async function cmdSync(argv) {
     // sub-agent logs nest one level deeper, so the resolver recurses. See the
     // parser comment in rollout.js for the cache-aware token math.
     let workbuddyResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const workbuddyFiles = resolveWorkbuddyProjectFiles(process.env);
+    const workbuddyFiles = sourceAllowed("workbuddy") ? resolveWorkbuddyProjectFiles(process.env) : [];
     if (workbuddyFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing WorkBuddy ${renderBar(0)} | buckets 0`);
@@ -995,7 +1089,7 @@ async function cmdSync(argv) {
 
     // ── oh-my-pi (passive ~/.omp/agent/sessions/**/*.jsonl reader) ──
     let ompResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const ompFiles = resolveOmpSessionFiles(process.env);
+    const ompFiles = sourceAllowed("omp") ? resolveOmpSessionFiles(process.env) : [];
     if (ompFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing oh-my-pi ${renderBar(0)} | buckets 0`);
@@ -1024,7 +1118,7 @@ async function cmdSync(argv) {
     // prevents double-counting when explicit overrides (TOKENTRACKER_OMP_AGENT_DIR /
     // TOKENTRACKER_PI_AGENT_DIR) bypass the install-signal disambiguator.
     let piResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const piFiles = piAgentDirCollidesWithOmp(process.env)
+    const piFiles = !sourceAllowed("pi") || piAgentDirCollidesWithOmp(process.env)
       ? []
       : resolvePiSessionFiles(process.env);
     if (piFiles.length > 0) {
@@ -1052,7 +1146,7 @@ async function cmdSync(argv) {
 
     // ── Craft Agents (passive ~/.craft-agent + workspaces session.jsonl reader) ──
     let craftResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const craftFiles = resolveCraftSessionFiles(process.env);
+    const craftFiles = sourceAllowed("craft") ? resolveCraftSessionFiles(process.env) : [];
     if (craftFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Craft ${renderBar(0)} | buckets 0`);
@@ -1079,9 +1173,9 @@ async function cmdSync(argv) {
     // ── Grok Build (xAI) ──
     let grokResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     // Full passive scan of all Grok sessions (historical + any not covered by hook)
-    const grokSessions = resolveGrokBuildSessions(process.env);
+    const grokSessions = sourceAllowed("grok") ? resolveGrokBuildSessions(process.env) : [];
     const grokSessionInputs = [...grokSessions];
-    if (grokHookSignal && typeof grokHookSignal === "object") {
+    if (sourceAllowed("grok") && grokHookSignal && typeof grokHookSignal === "object") {
       const hookSessionId =
         typeof grokHookSignal.sessionId === "string" && grokHookSignal.sessionId.trim()
           ? grokHookSignal.sessionId.trim()
@@ -1146,13 +1240,13 @@ async function cmdSync(argv) {
         bucketsQueued: grokResult.bucketsQueued + grokScanResult.bucketsQueued,
       };
     }
-    if (opts.repairGrok) {
+    if (isFullSourceScan && opts.repairGrok) {
       await repairGrokQueueFromSessionSnapshots({ cursors, queuePath, queueStatePath });
     }
 
     // ── GitHub Copilot CLI (OTEL JSONL files) ──
     let copilotResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const copilotPaths = resolveCopilotOtelPaths(process.env);
+    const copilotPaths = sourceAllowed("copilot") ? resolveCopilotOtelPaths(process.env) : [];
     if (copilotPaths.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Copilot ${renderBar(0)} | buckets 0`);
@@ -1176,7 +1270,7 @@ async function cmdSync(argv) {
       }
     }
 
-    if (cursors?.projectHourly?.projects && projectQueuePath && projectQueueStatePath) {
+    if (isFullSourceScan && cursors?.projectHourly?.projects && projectQueuePath && projectQueueStatePath) {
       for (const [projectKey, meta] of Object.entries(cursors.projectHourly.projects)) {
         if (!meta || typeof meta !== "object") continue;
         if (meta.status !== "blocked" || !meta.purge_pending) continue;
@@ -1192,7 +1286,9 @@ async function cmdSync(argv) {
       }
     }
 
-    await applyCloudConversationsBackfill({ cursors, queueStatePath });
+    if (isFullSourceScan) {
+      await applyCloudConversationsBackfill({ cursors, queueStatePath });
+    }
 
     cursors.updatedAt = new Date().toISOString();
     await writeJson(cursorsPath, cursors);
@@ -1253,11 +1349,10 @@ async function cmdSync(argv) {
 
     const afterState = (await readJson(queueStatePath)) || { offset: 0 };
     const queueSize = await safeStatSize(queuePath);
-    const projectAfterState = (await readJson(projectQueueStatePath)) || { offset: 0 };
-    const projectQueueSize = await safeStatSize(projectQueuePath);
-    const pendingBytes =
-      Math.max(0, queueSize - Number(afterState.offset || 0)) +
-      Math.max(0, projectQueueSize - Number(projectAfterState.offset || 0));
+    // Only the main queue is uploaded by drainQueueToCloud. project.queue.jsonl
+    // is local project-usage state, so counting it here creates false backlog
+    // and can keep auto retry alive even after cloud sync has drained.
+    const pendingBytes = Math.max(0, queueSize - Number(afterState.offset || 0));
 
     if (pendingBytes <= 0) {
       await clearAutoRetry(trackerDir);
@@ -1269,7 +1364,8 @@ async function cmdSync(argv) {
           retryAtMs,
           reason: "backlog",
           pendingBytes,
-          source: "auto-backlog",
+          source: autoSourceScope ? `${autoSourceScope}-backlog` : "auto-backlog",
+          syncSource: autoSourceScope,
           autoRetryNoSpawn: runtime.autoRetryNoSpawn,
         });
       }
@@ -1362,6 +1458,7 @@ function parseArgs(argv) {
     fromNotify: false,
     fromRetry: false,
     fromOpenclaw: false,
+    source: null,
     drain: false,
     repairGrok: false,
   };
@@ -1371,11 +1468,80 @@ function parseArgs(argv) {
     else if (a === "--from-notify") out.fromNotify = true;
     else if (a === "--from-retry") out.fromRetry = true;
     else if (a === "--from-openclaw") out.fromOpenclaw = true;
+    else if (a === "--source") {
+      out.source = normalizeSyncSource(argv[i + 1]);
+      i += 1;
+    }
+    else if (a.startsWith("--source=")) out.source = normalizeSyncSource(a.slice("--source=".length));
     else if (a === "--drain") out.drain = true;
     else if (a === "--repair-grok") out.repairGrok = true;
     else throw new Error(`Unknown option: ${a}`);
   }
   return out;
+}
+
+function resolveAutoSourceScope(opts) {
+  if (!opts?.auto) return null;
+  if (opts.fromOpenclaw) return "openclaw";
+  if (opts.fromRetry) return normalizeSyncSource(opts.source);
+  if (!opts.fromNotify) return null;
+  return normalizeSyncSource(opts.source);
+}
+
+function normalizeSyncSource(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  const aliased = AUTO_SYNC_SOURCE_ALIASES.get(normalized) || normalized;
+  return AUTO_SYNC_SOURCES.has(aliased) ? aliased : null;
+}
+
+function isCodexColdScanAuditDue(cursors, nowMs = Date.now()) {
+  const state = cursors?.codexColdScanAudit;
+  if (!state || typeof state !== "object" || state.version !== 1) return true;
+  const lastFullScanAtMs = Number(state.lastFullScanAtMs);
+  if (!Number.isFinite(lastFullScanAtMs) || lastFullScanAtMs <= 0) return true;
+  if (Number.isFinite(nowMs) && lastFullScanAtMs - nowMs > 5 * 60 * 1000) return true;
+  if (Number.isFinite(nowMs) && nowMs - lastFullScanAtMs >= CODEX_COLD_SCAN_AUDIT_INTERVAL_MS) {
+    return true;
+  }
+  const syncsSinceFullScan = Number(state.syncsSinceFullScan || 0);
+  return (
+    Number.isFinite(syncsSinceFullScan) &&
+    syncsSinceFullScan >= CODEX_COLD_SCAN_AUDIT_MAX_SYNCS
+  );
+}
+
+function recordCodexColdScanAudit(cursors, { fullAudit = false, skipped = 0 } = {}, nowMs = Date.now()) {
+  if (!cursors || typeof cursors !== "object") return;
+  const prev =
+    cursors.codexColdScanAudit && typeof cursors.codexColdScanAudit === "object"
+      ? cursors.codexColdScanAudit
+      : {};
+  const previousSyncs = Number(prev.syncsSinceFullScan || 0);
+  const lastFullScanAtMs = Number(prev.lastFullScanAtMs);
+  const next = {
+    version: 1,
+    lastFullScanAtMs: Number.isFinite(lastFullScanAtMs) && lastFullScanAtMs > 0
+      ? lastFullScanAtMs
+      : nowMs,
+    syncsSinceFullScan: Number.isFinite(previousSyncs) && previousSyncs > 0
+      ? previousSyncs
+      : 0,
+    lastSkippedFiles: Math.max(0, Number(skipped) || 0),
+    updatedAt: new Date(nowMs).toISOString(),
+  };
+  if (fullAudit) {
+    next.lastFullScanAtMs = nowMs;
+    next.lastFullScanAt = new Date(nowMs).toISOString();
+    next.syncsSinceFullScan = 0;
+  } else {
+    next.lastFullScanAt = Number.isFinite(next.lastFullScanAtMs)
+      ? new Date(next.lastFullScanAtMs).toISOString()
+      : null;
+    next.syncsSinceFullScan += 1;
+  }
+  cursors.codexColdScanAudit = next;
 }
 
 module.exports = {
@@ -1388,6 +1554,10 @@ module.exports = {
   reincludeClaudeMemObserverFiles,
   repairGrokQueueFromSessionSnapshots,
   applyCloudConversationsBackfill,
+  scheduleAutoRetry,
+  buildAutoRetryScript,
+  isCodexColdScanAuditDue,
+  recordCodexColdScanAudit,
   CURSOR_UNKNOWN_MIGRATION_KEY,
   ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY,
   CODEX_RESCAN_DEDUP_REPAIR_KEY,
@@ -1569,6 +1739,7 @@ async function scheduleAutoRetry({
   reason,
   pendingBytes,
   source,
+  syncSource,
   autoRetryNoSpawn,
 }) {
   const retryMs = coerceRetryMs(retryAtMs);
@@ -1578,19 +1749,33 @@ async function scheduleAutoRetry({
   const nowMs = Date.now();
   const existing = await readJson(retryPath);
   const existingMs = coerceRetryMs(existing?.retryAtMs);
+  const normalizedSyncSource = normalizeSyncSource(syncSource);
   if (existingMs && existingMs >= retryMs - 1000) {
+    const existingSyncSource = normalizeSyncSource(existing?.syncSource);
+    if (existingSyncSource !== normalizedSyncSource) {
+      await writeJson(
+        retryPath,
+        buildAutoRetryPayload({
+          retryMs: existingMs,
+          nowMs,
+          reason,
+          pendingBytes,
+          source,
+          syncSource: normalizedSyncSource,
+        }),
+      );
+    }
     return { scheduled: false, retryAtMs: existingMs };
   }
 
-  const payload = {
-    version: 1,
-    retryAtMs: retryMs,
-    retryAt: new Date(retryMs).toISOString(),
-    reason: typeof reason === "string" && reason.length > 0 ? reason : "throttled",
-    pendingBytes: Math.max(0, Number(pendingBytes || 0)),
-    scheduledAt: new Date(nowMs).toISOString(),
-    source: typeof source === "string" ? source : "auto",
-  };
+  const payload = buildAutoRetryPayload({
+    retryMs,
+    nowMs,
+    reason,
+    pendingBytes,
+    source,
+    syncSource: normalizedSyncSource,
+  });
 
   await writeJson(retryPath, payload);
 
@@ -1607,6 +1792,20 @@ async function scheduleAutoRetry({
     delayMs,
   });
   return { scheduled: true, retryAtMs: retryMs };
+}
+
+function buildAutoRetryPayload({ retryMs, nowMs, reason, pendingBytes, source, syncSource }) {
+  const payload = {
+    version: 1,
+    retryAtMs: retryMs,
+    retryAt: new Date(retryMs).toISOString(),
+    reason: typeof reason === "string" && reason.length > 0 ? reason : "throttled",
+    pendingBytes: Math.max(0, Number(pendingBytes || 0)),
+    scheduledAt: new Date(nowMs).toISOString(),
+    source: typeof source === "string" ? source : "auto",
+  };
+  if (syncSource) payload.syncSource = syncSource;
+  return payload;
 }
 
 async function clearAutoRetry(trackerDir) {
@@ -1636,13 +1835,18 @@ function buildAutoRetryScript({ retryPath, trackerBinPath, fallbackPkg, delayMs 
     `const fallbackPkg = ${JSON.stringify(fallbackPkg)};\n` +
     `const delayMs = ${Math.max(0, Math.floor(delayMs || 0))};\n` +
     `setTimeout(() => {\n` +
+    `  let payload = null;\n` +
     `  let retryAtMs = 0;\n` +
     `  try {\n` +
     `    const raw = fs.readFileSync(retryPath, 'utf8');\n` +
-    `    retryAtMs = Number(JSON.parse(raw).retryAtMs || 0);\n` +
+    `    payload = JSON.parse(raw);\n` +
+    `    retryAtMs = Number(payload.retryAtMs || 0);\n` +
     `  } catch (_) {}\n` +
     `  if (!retryAtMs || Date.now() + 1000 < retryAtMs) process.exit(0);\n` +
     `  const argv = ['sync', '--auto', '--from-retry'];\n` +
+    `  if (payload && typeof payload.syncSource === 'string' && payload.syncSource.trim()) {\n` +
+    `    argv.push('--source', payload.syncSource.trim());\n` +
+    `  }\n` +
     `  const cmd = fs.existsSync(trackerBinPath)\n` +
     `    ? [process.execPath, trackerBinPath, ...argv]\n` +
     `    : ['npx', '--yes', fallbackPkg, ...argv];\n` +
@@ -2398,7 +2602,14 @@ async function migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rollou
 // contributed is gone from disk (genuinely deleted — Codex-Manager log rotation
 // or user cleanup) the migration is skipped entirely — the forward dedup fix
 // still prevents new double-counting; only this historical correction is deferred.
-async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, rolloutFiles }) {
+async function repairCodexRescanInflation({
+  cursors,
+  queuePath,
+  queueStatePath,
+  projectQueuePath,
+  projectQueueStatePath,
+  rolloutFiles,
+}) {
   if (!cursors || typeof cursors !== "object") return false;
   const migrations = (cursors.migrations ||= {});
   // A COMPLETED run writes an ISO-string timestamp (final — never re-run). A
@@ -2419,6 +2630,7 @@ async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, 
     if (fp && src === "codex") codexFiles.push(fp);
   }
   const codexFileSet = new Set(codexFiles);
+  const projectRepairEnabled = typeof projectQueuePath === "string" && projectQueuePath.length > 0;
 
   // GUARD (data-loss prevention, ref the v6 ground-truth-repair incident): the
   // rebuild can only reproduce buckets from the files this sync re-parses
@@ -2439,7 +2651,7 @@ async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, 
   }
   if (cursors.files && typeof cursors.files === "object") {
     for (const fp of Object.keys(cursors.files)) {
-      if (!/\/\.codex\/(?:archived_)?sessions\//.test(fp)) continue;
+      if (!isCodexSessionCursorPath(fp)) continue;
       if (codexFileSet.has(fp)) continue; // exact file re-scanned this run
       const id = codexSessionIdFromPath(fp);
       if (id && scannedSessionIds.has(id)) continue; // same session scanned elsewhere (moved)
@@ -2461,6 +2673,9 @@ async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, 
   // would permanently zero a user's codex history.
   let rebuilt;
   const tmpQueue = `${queuePath}.codexrebuild.${process.pid}.${Date.now()}`;
+  const tmpProjectQueue = projectRepairEnabled
+    ? `${projectQueuePath}.codexrebuild.${process.pid}.${Date.now()}`
+    : null;
   try {
     const tmpCursors = {
       version: 1,
@@ -2472,6 +2687,7 @@ async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, 
       rolloutFiles: codexFiles.map((p) => ({ path: p, source: "codex" })),
       cursors: tmpCursors,
       queuePath: tmpQueue,
+      projectQueuePath: tmpProjectQueue,
     });
     let tmpRaw = "";
     try {
@@ -2479,12 +2695,22 @@ async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, 
     } catch (e) {
       if (e?.code !== "ENOENT") throw e;
     }
+    let tmpProjectRaw = "";
+    if (tmpProjectQueue) {
+      try {
+        tmpProjectRaw = await fs.readFile(tmpProjectQueue, "utf8");
+      } catch (e) {
+        if (e?.code !== "ENOENT") throw e;
+      }
+    }
     rebuilt = {
       buckets: tmpCursors.hourly.buckets || {},
       groupQueued: tmpCursors.hourly.groupQueued || {},
       codexHashes: Array.isArray(tmpCursors.codexHashes) ? tmpCursors.codexHashes : [],
       files: tmpCursors.files || {},
       queueRows: tmpRaw.split("\n").filter((l) => l.trim()),
+      projectHourly: tmpCursors.projectHourly || null,
+      projectQueueRows: tmpProjectRaw.split("\n").filter((l) => l.trim()),
     };
   } catch (e) {
     console.error(
@@ -2494,6 +2720,7 @@ async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, 
     return false;
   } finally {
     await fs.rm(tmpQueue, { force: true }).catch(() => {});
+    if (tmpProjectQueue) await fs.rm(tmpProjectQueue, { force: true }).catch(() => {});
   }
 
   // SANITY: codex files exist on disk but the rebuild produced no codex buckets
@@ -2505,6 +2732,64 @@ async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, 
       `[sync] codex rescan repair: rebuild produced 0 codex buckets from ${codexFiles.length} files — skipping to avoid data loss`,
     );
     return false;
+  }
+  if (projectRepairEnabled) {
+    const malformedProjectRows = await countMalformedCodexProjectQueueRows(projectQueuePath);
+    if (malformedProjectRows > 0) {
+      console.error(
+        `[sync] codex rescan repair: found ${malformedProjectRows} malformed codex project queue row(s) — skipping to avoid data loss`,
+      );
+      return false;
+    }
+
+    const existingProjectKeys = new Set([
+      ...(await projectUsageKeysFromQueuePath(projectQueuePath, "codex")),
+      ...projectUsageKeysFromState(cursors.projectHourly, "codex"),
+    ]);
+    const rebuiltProjectKeys = new Set([
+      ...projectUsageKeysFromQueueRows(rebuilt.projectQueueRows, "codex"),
+      ...projectUsageKeysFromState(rebuilt.projectHourly, "codex"),
+    ]);
+    const missingProjectKeys = [...existingProjectKeys].filter((key) => !rebuiltProjectKeys.has(key));
+    if (missingProjectKeys.length > 0) {
+      console.error(
+        `[sync] codex rescan repair: project rebuild missed ${missingProjectKeys.length} existing codex project bucket(s) — skipping to avoid data loss`,
+      );
+      return false;
+    }
+
+    const existingProjectTotals = mergeMaxTotals(
+      await projectUsageTotalsFromQueuePath(projectQueuePath, "codex"),
+      projectUsageTotalsFromState(cursors.projectHourly, "codex"),
+    );
+    const rebuiltProjectTotals = mergeMaxTotals(
+      projectUsageTotalsFromQueueRows(rebuilt.projectQueueRows, "codex"),
+      projectUsageTotalsFromState(rebuilt.projectHourly, "codex"),
+    );
+    const existingMainHourTotals = mergeMaxTotals(
+      await mainUsageHourTotalsFromQueuePath(queuePath, "codex"),
+      mainUsageHourTotalsFromState(cursors.hourly, "codex"),
+    );
+    const rebuiltMainHourTotals = mergeMaxTotals(
+      mainUsageHourTotalsFromQueueRows(rebuilt.queueRows, "codex"),
+      mainUsageHourTotalsFromState({ buckets: rebuilt.buckets }, "codex"),
+    );
+    const partialProjectKeys = [];
+    for (const [key, existingTotal] of existingProjectTotals.entries()) {
+      const rebuiltTotal = rebuiltProjectTotals.get(key);
+      if (!Number.isFinite(rebuiltTotal) || rebuiltTotal >= existingTotal) continue;
+      const [, source, hourStart] = key.split("|");
+      const mainKey = `${source}|${hourStart}`;
+      const existingMainTotal = existingMainHourTotals.get(mainKey) || 0;
+      const rebuiltMainTotal = rebuiltMainHourTotals.get(mainKey) || 0;
+      if (rebuiltMainTotal >= existingMainTotal) partialProjectKeys.push(key);
+    }
+    if (partialProjectKeys.length > 0) {
+      console.error(
+        `[sync] codex rescan repair: project rebuild lowered ${partialProjectKeys.length} existing codex project bucket(s) without a matching main-bucket repair — skipping to avoid data loss`,
+      );
+      return false;
+    }
   }
 
   // COMMIT (only after a verified rebuild). A crash partway just leaves the
@@ -2560,14 +2845,65 @@ async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, 
   }
   cursors.files ||= {};
   for (const fp of Object.keys(cursors.files)) {
-    if (/\/\.codex\/(?:archived_)?sessions\//.test(fp)) delete cursors.files[fp];
+    if (isCodexSessionCursorPath(fp)) delete cursors.files[fp];
   }
   for (const [fp, v] of Object.entries(rebuilt.files)) {
     cursors.files[fp] = v;
   }
   cursors.codexHashes = rebuilt.codexHashes;
 
-  // 3. Reset the cloud upload offset so the corrected queue re-uploads. Other
+  // 3. Project usage mirrors the main Codex repair: drop inflated Codex project
+  //    rows, append the rebuilt rows, and swap only Codex project buckets. Project
+  //    metadata is merged so visibility/purge state from non-Codex sources stays.
+  if (projectRepairEnabled) {
+    let projectRaw = "";
+    try {
+      projectRaw = await fs.readFile(projectQueuePath, "utf8");
+    } catch (e) {
+      if (e?.code !== "ENOENT") throw e;
+    }
+    const keptProjectRows = [];
+    for (const line of projectRaw.split("\n")) {
+      if (!line.trim()) continue;
+      let row;
+      try {
+        row = JSON.parse(line);
+      } catch (_e) {
+        keptProjectRows.push(line);
+        continue;
+      }
+      if (row?.source === "codex") continue;
+      keptProjectRows.push(line);
+    }
+    await ensureDir(path.dirname(projectQueuePath));
+    const tmp = `${projectQueuePath}.tmp.${process.pid}.${Date.now()}`;
+    await fs.writeFile(
+      tmp,
+      keptProjectRows.concat(rebuilt.projectQueueRows).join("\n") + "\n",
+      "utf8",
+    );
+    await fs.rename(tmp, projectQueuePath);
+
+    const projectHourly = (cursors.projectHourly ||= { version: 2, buckets: {}, projects: {} });
+    projectHourly.version = 2;
+    projectHourly.buckets ||= {};
+    projectHourly.projects ||= {};
+    for (const [key, bucket] of Object.entries(projectHourly.buckets)) {
+      const source = typeof bucket?.source === "string" ? bucket.source : key.split("|")[1];
+      if (source === "codex") delete projectHourly.buckets[key];
+    }
+    const rebuiltProjectHourly = rebuilt.projectHourly || {};
+    for (const [key, bucket] of Object.entries(rebuiltProjectHourly.buckets || {})) {
+      const source = typeof bucket?.source === "string" ? bucket.source : key.split("|")[1];
+      if (source === "codex") projectHourly.buckets[key] = bucket;
+    }
+    for (const [key, meta] of Object.entries(rebuiltProjectHourly.projects || {})) {
+      if (meta && typeof meta === "object") projectHourly.projects[key] = meta;
+    }
+    projectHourly.updatedAt = new Date().toISOString();
+  }
+
+  // 4. Reset the cloud upload offset so the corrected queue re-uploads. Other
   //    sources re-upsert idempotently (last emission per key wins).
   if (typeof queueStatePath === "string" && queueStatePath) {
     let uploadState = {};
@@ -2581,9 +2917,247 @@ async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, 
     uploadState.note = "reset_after_codex_rescan_dedup_2026_06";
     await fs.writeFile(queueStatePath, JSON.stringify(uploadState));
   }
+  if (projectRepairEnabled && typeof projectQueueStatePath === "string" && projectQueueStatePath) {
+    let uploadState = {};
+    try {
+      uploadState = JSON.parse(await fs.readFile(projectQueueStatePath, "utf8"));
+    } catch (_e) {
+      uploadState = {};
+    }
+    uploadState.offset = 0;
+    uploadState.updatedAt = new Date().toISOString();
+    uploadState.note = "reset_after_codex_rescan_dedup_2026_06";
+    await fs.writeFile(projectQueueStatePath, JSON.stringify(uploadState));
+  }
 
   migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY] = new Date().toISOString();
   return true;
+}
+
+function isCodexSessionCursorPath(filePath) {
+  if (typeof filePath !== "string") return false;
+  const normalized = filePath.replace(/\\/g, "/");
+  return /\/\.codex\/(?:archived_)?sessions\//.test(normalized);
+}
+
+async function projectUsageKeysFromQueuePath(queuePath, source) {
+  if (typeof queuePath !== "string" || !queuePath) return [];
+  let raw = "";
+  try {
+    raw = await fs.readFile(queuePath, "utf8");
+  } catch (e) {
+    if (e?.code !== "ENOENT") throw e;
+    return [];
+  }
+  return projectUsageKeysFromQueueRows(raw.split("\n").filter((line) => line.trim()), source);
+}
+
+function projectUsageKeysFromQueueRows(rows, source) {
+  const keys = [];
+  for (const line of Array.isArray(rows) ? rows : []) {
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch (_e) {
+      continue;
+    }
+    const key = projectUsageKeyFromFields({
+      projectKey: row?.project_key,
+      source: row?.source,
+      hourStart: row?.hour_start,
+    });
+    if (key && row?.source === source) keys.push(key);
+  }
+  return keys;
+}
+
+function projectUsageKeysFromState(projectState, source) {
+  const buckets =
+    projectState && typeof projectState === "object" && projectState.buckets
+      ? projectState.buckets
+      : {};
+  const keys = [];
+  for (const [key, bucket] of Object.entries(buckets)) {
+    const bucketSource = typeof bucket?.source === "string" ? bucket.source : key.split("|")[1];
+    if (bucketSource !== source) continue;
+    const usageKey =
+      projectUsageKeyFromFields({
+        projectKey: bucket?.project_key,
+        source: bucketSource,
+        hourStart: bucket?.hour_start,
+      }) || key;
+    keys.push(usageKey);
+  }
+  return keys;
+}
+
+function projectUsageKeyFromFields({ projectKey, source, hourStart }) {
+  if (
+    typeof projectKey !== "string" ||
+    typeof source !== "string" ||
+    typeof hourStart !== "string" ||
+    !projectKey ||
+    !source ||
+    !hourStart
+  ) {
+    return null;
+  }
+  return `${projectKey}|${source}|${hourStart}`;
+}
+
+async function countMalformedCodexProjectQueueRows(queuePath) {
+  if (typeof queuePath !== "string" || !queuePath) return 0;
+  let raw = "";
+  try {
+    raw = await fs.readFile(queuePath, "utf8");
+  } catch (e) {
+    if (e?.code !== "ENOENT") throw e;
+    return 0;
+  }
+  let count = 0;
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch (_e) {
+      continue;
+    }
+    if (row?.source !== "codex") continue;
+    const key = projectUsageKeyFromFields({
+      projectKey: row?.project_key,
+      source: row?.source,
+      hourStart: row?.hour_start,
+    });
+    if (!key) count += 1;
+  }
+  return count;
+}
+
+async function projectUsageTotalsFromQueuePath(queuePath, source) {
+  if (typeof queuePath !== "string" || !queuePath) return new Map();
+  let raw = "";
+  try {
+    raw = await fs.readFile(queuePath, "utf8");
+  } catch (e) {
+    if (e?.code !== "ENOENT") throw e;
+    return new Map();
+  }
+  return projectUsageTotalsFromQueueRows(raw.split("\n").filter((line) => line.trim()), source);
+}
+
+function projectUsageTotalsFromQueueRows(rows, source) {
+  const totals = new Map();
+  for (const line of Array.isArray(rows) ? rows : []) {
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch (_e) {
+      continue;
+    }
+    const key = projectUsageKeyFromFields({
+      projectKey: row?.project_key,
+      source: row?.source,
+      hourStart: row?.hour_start,
+    });
+    if (!key || row?.source !== source) continue;
+    setMaxTotal(totals, key, Number(row.total_tokens || 0));
+  }
+  return totals;
+}
+
+function projectUsageTotalsFromState(projectState, source) {
+  const buckets =
+    projectState && typeof projectState === "object" && projectState.buckets
+      ? projectState.buckets
+      : {};
+  const totals = new Map();
+  for (const [key, bucket] of Object.entries(buckets)) {
+    const bucketSource = typeof bucket?.source === "string" ? bucket.source : key.split("|")[1];
+    if (bucketSource !== source) continue;
+    const usageKey =
+      projectUsageKeyFromFields({
+        projectKey: bucket?.project_key,
+        source: bucketSource,
+        hourStart: bucket?.hour_start,
+      }) || key;
+    setMaxTotal(totals, usageKey, Number(bucket?.totals?.total_tokens || 0));
+  }
+  return totals;
+}
+
+async function mainUsageHourTotalsFromQueuePath(queuePath, source) {
+  if (typeof queuePath !== "string" || !queuePath) return new Map();
+  let raw = "";
+  try {
+    raw = await fs.readFile(queuePath, "utf8");
+  } catch (e) {
+    if (e?.code !== "ENOENT") throw e;
+    return new Map();
+  }
+  return mainUsageHourTotalsFromQueueRows(raw.split("\n").filter((line) => line.trim()), source);
+}
+
+function mainUsageHourTotalsFromQueueRows(rows, source) {
+  const modelTotals = new Map();
+  for (const line of Array.isArray(rows) ? rows : []) {
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch (_e) {
+      continue;
+    }
+    if (row?.source !== source || typeof row?.hour_start !== "string") continue;
+    const model = typeof row?.model === "string" && row.model ? row.model : "unknown";
+    setMaxTotal(modelTotals, `${row.source}|${model}|${row.hour_start}`, Number(row.total_tokens || 0));
+  }
+  return collapseModelTotalsByHour(modelTotals);
+}
+
+function mainUsageHourTotalsFromState(hourlyState, source) {
+  const buckets =
+    hourlyState && typeof hourlyState === "object" && hourlyState.buckets
+      ? hourlyState.buckets
+      : {};
+  const modelTotals = new Map();
+  for (const [key, bucket] of Object.entries(buckets)) {
+    const parts = key.split("|");
+    const bucketSource = typeof bucket?.source === "string" ? bucket.source : parts[0];
+    if (bucketSource !== source) continue;
+    const model = typeof bucket?.model === "string" && bucket.model ? bucket.model : parts[1] || "unknown";
+    const hourStart =
+      typeof bucket?.hour_start === "string" && bucket.hour_start ? bucket.hour_start : parts[2];
+    if (typeof hourStart !== "string" || !hourStart) continue;
+    setMaxTotal(modelTotals, `${bucketSource}|${model}|${hourStart}`, Number(bucket?.totals?.total_tokens || 0));
+  }
+  return collapseModelTotalsByHour(modelTotals);
+}
+
+function collapseModelTotalsByHour(modelTotals) {
+  const totals = new Map();
+  for (const [key, total] of modelTotals.entries()) {
+    const [source, , hourStart] = key.split("|");
+    const hourKey = `${source}|${hourStart}`;
+    totals.set(hourKey, (totals.get(hourKey) || 0) + total);
+  }
+  return totals;
+}
+
+function mergeMaxTotals(...maps) {
+  const merged = new Map();
+  for (const map of maps) {
+    if (!(map instanceof Map)) continue;
+    for (const [key, total] of map.entries()) {
+      setMaxTotal(merged, key, total);
+    }
+  }
+  return merged;
+}
+
+function setMaxTotal(map, key, total) {
+  if (!key || !Number.isFinite(total)) return;
+  const prev = map.get(key);
+  if (!Number.isFinite(prev) || total > prev) map.set(key, total);
 }
 
 // One-time repair (#204): when the SAME Droid session id existed in two folders

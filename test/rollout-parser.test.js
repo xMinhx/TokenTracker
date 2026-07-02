@@ -47,6 +47,7 @@ const {
   resolveKimiCodeWireFiles,
   resolveKimiCodeDefaultModel,
   listRolloutFilesDeep,
+  filterColdCodexRolloutFiles,
 } = require("../src/lib/rollout");
 const { purgeProjectUsage } = require("../src/lib/project-usage-purge");
 
@@ -447,10 +448,17 @@ test("parseRolloutIncremental skips unchanged files when project state is disabl
   }
 });
 
-test("parseRolloutIncremental still processes unchanged files when project state is enabled", async () => {
+test("parseRolloutIncremental skips unchanged project-enabled files after project EOF is recorded", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
   try {
-    const rolloutPath = path.join(tmp, "rollout-test.jsonl");
+    const repoRoot = path.join(tmp, "repo");
+    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoRoot, ".git", "config"),
+      `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+      "utf8",
+    );
+    const rolloutPath = path.join(repoRoot, "rollout-test.jsonl");
     const queuePath = path.join(tmp, "queue.jsonl");
     const projectQueuePath = path.join(tmp, "project.queue.jsonl");
     const cursors = { version: 1, files: {}, updatedAt: null };
@@ -477,6 +485,136 @@ test("parseRolloutIncremental still processes unchanged files when project state
       projectQueuePath,
     });
     assert.equal(first.filesProcessed, 1);
+    assert.equal(first.projectBucketsQueued, 1);
+    assert.equal(cursors.files[rolloutPath].projectOffset, cursors.files[rolloutPath].offset);
+    assert.equal(cursors.files[rolloutPath].projectFileContext.configPath.endsWith("config"), true);
+
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(second.filesProcessed, 0);
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(second.bucketsQueued, 0);
+    assert.equal(second.projectBucketsQueued, 0);
+
+    await fs.writeFile(path.join(repoRoot, ".git", "config"), "", "utf8");
+    const third = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(third.filesProcessed, 1);
+    assert.equal(third.eventsAggregated, 0);
+    assert.equal(third.bucketsQueued, 0);
+    assert.equal(cursors.projectHourly.projects["acme/alpha"].status, "blocked");
+    assert.equal(cursors.projectHourly.projects["acme/alpha"].purge_pending, true);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental skips unchanged codex sessions using turn_context cwd project freshness", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoRoot, ".git", "config"),
+      `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+      "utf8",
+    );
+    const sessionsDir = path.join(tmp, ".codex", "sessions", "2026", "01", "26");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const rolloutPath = path.join(sessionsDir, "rollout-test.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    await fs.writeFile(
+      rolloutPath,
+      [
+        buildTurnContextLine({ model: "gpt-4", cwd: repoRoot }),
+        buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(first.filesProcessed, 1);
+    assert.equal(first.projectBucketsQueued, 1);
+    assert.equal(cursors.files[rolloutPath].projectFileContext.configPath.endsWith("config"), true);
+
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(second.filesProcessed, 0);
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(second.projectBucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental recovers legacy Codex EOF cursor project freshness from turn_context cwd", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoRoot, ".git", "config"),
+      `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+      "utf8",
+    );
+    const sessionsDir = path.join(tmp, ".codex", "sessions", "2026", "01", "26");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const rolloutPath = path.join(
+      sessionsDir,
+      "rollout-2026-01-26T00-00-00-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+    );
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    await fs.writeFile(
+      rolloutPath,
+      [
+        buildTurnContextLine({ model: "gpt-4", cwd: repoRoot }),
+        buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(first.filesProcessed, 1);
+    assert.equal(cursors.files[rolloutPath].projectOffset, undefined);
 
     const second = await parseRolloutIncremental({
       rolloutFiles: [rolloutPath],
@@ -487,6 +625,438 @@ test("parseRolloutIncremental still processes unchanged files when project state
     assert.equal(second.filesProcessed, 1);
     assert.equal(second.eventsAggregated, 0);
     assert.equal(second.bucketsQueued, 0);
+    assert.equal(second.projectBucketsQueued, 0);
+    assert.equal(cursors.files[rolloutPath].projectOffset, cursors.files[rolloutPath].offset);
+    assert.equal(cursors.files[rolloutPath].projectFileContext.configPath.endsWith("config"), true);
+
+    const third = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(third.filesProcessed, 0);
+    assert.equal(third.eventsAggregated, 0);
+    assert.equal(third.projectBucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental gives legacy project cursors one EOF pass before skipping", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoRoot, ".git", "config"),
+      `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+      "utf8",
+    );
+    const rolloutPath = path.join(repoRoot, "rollout-test.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    await fs.writeFile(
+      rolloutPath,
+      [
+        buildTurnContextLine({ model: "gpt-4" }),
+        buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(first.filesProcessed, 1);
+    assert.equal(cursors.files[rolloutPath].projectOffset, undefined);
+
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(second.filesProcessed, 1);
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(second.bucketsQueued, 0);
+    assert.equal(cursors.files[rolloutPath].projectOffset, cursors.files[rolloutPath].offset);
+
+    const third = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(third.filesProcessed, 0);
+    assert.equal(third.eventsAggregated, 0);
+    assert.equal(third.bucketsQueued, 0);
+    assert.equal(third.projectBucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental does not skip unchanged project files with a custom resolver", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoRoot, ".git", "config"),
+      `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+      "utf8",
+    );
+    const rolloutPath = path.join(repoRoot, "rollout-test.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    await fs.writeFile(
+      rolloutPath,
+      [
+        buildTurnContextLine({ model: "gpt-4" }),
+        buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    let resolverCalls = 0;
+    const publicRepoResolver = async ({ projectRef }) => {
+      resolverCalls += 1;
+      return { status: "public_verified", projectKey: "acme/alpha", projectRef };
+    };
+
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+      publicRepoResolver,
+    });
+    assert.equal(first.filesProcessed, 1);
+
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+      publicRepoResolver,
+    });
+    assert.equal(second.filesProcessed, 1);
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(resolverCalls, 2);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental throttles unchanged files after missing project context", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    await fs.mkdir(repoRoot, { recursive: true });
+    const rolloutPath = path.join(repoRoot, "rollout-test.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    await fs.writeFile(
+      rolloutPath,
+      [
+        buildTurnContextLine({ model: "gpt-4" }),
+        buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(first.filesProcessed, 1);
+    assert.equal(cursors.files[rolloutPath].projectFileContext.absent, true);
+    assert.equal(typeof cursors.files[rolloutPath].projectFileContext.checkedAtMs, "number");
+
+    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoRoot, ".git", "config"),
+      `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+      "utf8",
+    );
+
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(second.filesProcessed, 0);
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(cursors.files[rolloutPath].projectFileContext.absent, true);
+
+    cursors.files[rolloutPath].projectFileContext.checkedAtMs = 1;
+    const third = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(third.filesProcessed, 1);
+    assert.equal(third.eventsAggregated, 0);
+    assert.equal(cursors.files[rolloutPath].projectFileContext.configPath.endsWith("config"), true);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental memoizes project config freshness during idle scans", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  const realStat = fs.stat;
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    const configPath = path.join(repoRoot, ".git", "config");
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(
+      configPath,
+      `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+      "utf8",
+    );
+    const sessionsDir = path.join(tmp, ".codex", "sessions", "2026", "01", "26");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    const rolloutFiles = [];
+    for (let i = 0; i < 3; i += 1) {
+      const rolloutPath = path.join(sessionsDir, `rollout-test-${i}.jsonl`);
+      rolloutFiles.push(rolloutPath);
+      await fs.writeFile(
+        rolloutPath,
+        [
+          buildTurnContextLine({ model: "gpt-4", cwd: repoRoot }),
+          buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+    }
+
+    await parseRolloutIncremental({
+      rolloutFiles,
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+
+    let configStats = 0;
+    fs.stat = async function countedStat(target, ...args) {
+      if (String(target) === configPath) configStats += 1;
+      return realStat.call(this, target, ...args);
+    };
+    const second = await parseRolloutIncremental({
+      rolloutFiles,
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(second.filesProcessed, 0);
+    assert.equal(configStats, 1);
+  } finally {
+    fs.stat = realStat;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental keeps project EOF fast path scoped to codex source", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoRoot, ".git", "config"),
+      `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+      "utf8",
+    );
+    const rolloutPath = path.join(repoRoot, "rollout-test.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    await fs.writeFile(
+      rolloutPath,
+      [
+        buildTurnContextLine({ model: "gpt-4" }),
+        buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [{ path: rolloutPath, source: "every-code" }],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(first.filesProcessed, 1);
+    assert.equal(cursors.files[rolloutPath].projectOffset, undefined);
+
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [{ path: rolloutPath, source: "every-code" }],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(second.filesProcessed, 1);
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(cursors.files[rolloutPath].projectOffset, undefined);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("filterColdCodexRolloutFiles skips historical EOF Codex files without statting them", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  const realStat = fs.stat;
+  try {
+    const oldPath = path.join(
+      tmp,
+      ".codex",
+      "sessions",
+      "2026",
+      "01",
+      "01",
+      "rollout-2026-01-01T00-00-00-019f16bd-1111-7222-8333-444444444444.jsonl",
+    );
+    const recentPath = path.join(
+      tmp,
+      ".codex",
+      "sessions",
+      "2026",
+      "07",
+      "02",
+      "rollout-2026-07-02T00-00-00-019f16bd-2222-7333-8444-555555555555.jsonl",
+    );
+    const otherSourcePath = path.join(
+      tmp,
+      ".code",
+      "sessions",
+      "rollout-2026-01-01T00-00-00-019f16bd-3333-7444-8555-666666666666.jsonl",
+    );
+    let rolloutStats = 0;
+    fs.stat = async function countedStat(target, ...args) {
+      if (String(target).endsWith(".jsonl")) rolloutStats += 1;
+      return realStat.call(this, target, ...args);
+    };
+
+    const filtered = await filterColdCodexRolloutFiles({
+      rolloutFiles: [
+        { path: oldPath, source: "codex" },
+        { path: recentPath, source: "codex" },
+        { path: otherSourcePath, source: "every-code" },
+      ],
+      cursors: {
+        files: {
+          [oldPath]: { offset: 123, projectOffset: 123 },
+          [recentPath]: { offset: 123, projectOffset: 123 },
+          [otherSourcePath]: { offset: 123 },
+        },
+      },
+      projectEnabled: false,
+      nowMs: Date.UTC(2026, 6, 2),
+    });
+
+    assert.equal(filtered.skipped, 1);
+    assert.deepEqual(
+      filtered.rolloutFiles.map((entry) => entry.path),
+      [recentPath, otherSourcePath],
+    );
+    assert.equal(rolloutStats, 0);
+  } finally {
+    fs.stat = realStat;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("filterColdCodexRolloutFiles keeps project-stale historical files parseable", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    const configPath = path.join(repoRoot, ".git", "config");
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(
+      configPath,
+      `[remote "origin"]\n\turl = https://github.com/acme/changed.git\n`,
+      "utf8",
+    );
+    const configStat = await fs.stat(configPath);
+    const rolloutPath = path.join(
+      tmp,
+      ".codex",
+      "sessions",
+      "2026",
+      "01",
+      "01",
+      "rollout-2026-01-01T00-00-00-019f16bd-4444-7555-8666-777777777777.jsonl",
+    );
+
+    const filtered = await filterColdCodexRolloutFiles({
+      rolloutFiles: [{ path: rolloutPath, source: "codex" }],
+      cursors: {
+        files: {
+          [rolloutPath]: {
+            offset: 123,
+            projectOffset: 123,
+            projectFileContext: {
+              configPath,
+              configMtimeMs: configStat.mtimeMs - 1,
+              configSize: configStat.size,
+            },
+          },
+        },
+      },
+      projectEnabled: true,
+      nowMs: Date.UTC(2026, 6, 2),
+    });
+
+    assert.equal(filtered.skipped, 0);
+    assert.deepEqual(filtered.rolloutFiles, [{ path: rolloutPath, source: "codex" }]);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

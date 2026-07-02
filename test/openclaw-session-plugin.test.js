@@ -310,6 +310,11 @@ test("ensureOpenclawSessionPluginFiles includes agent/session lifecycle hooks", 
   assert.match(index, /api\.on\('gateway_start'/);
   assert.match(index, /api\.on\('gateway_stop'/);
   assert.match(index, /TOKENTRACKER_OPENCLAW_PREV_SESSION_ID/);
+  assert.equal(
+    (index.match(/args: \['sync', '--auto', '--from-openclaw'\]/g) || []).length,
+    3,
+    "agent and gateway lifecycle syncs must stay scoped to OpenClaw",
+  );
 
   await fs.rm(tmp, { recursive: true, force: true });
 });

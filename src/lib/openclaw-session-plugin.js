@@ -437,14 +437,14 @@ function buildSessionPluginIndex({ trackerDir, packageName = "tokentracker-cli",
     `  api.on('gateway_start', async () => {\n` +
     `    try {\n` +
     `      if (!allowTrigger('gateway_start', 'gateway', 'startup')) return;\n` +
-    `      spawnSync({ args: ['sync', '--auto'] });\n` +
+    `      spawnSync({ args: ['sync', '--auto', '--from-openclaw'] });\n` +
     `    } catch (_) {}\n` +
     `  });\n` +
     `\n` +
     `  api.on('gateway_stop', async () => {\n` +
     `    try {\n` +
     `      if (!allowTrigger('gateway_stop', 'gateway', 'stop')) return;\n` +
-    `      spawnSync({ args: ['sync', '--auto'] });\n` +
+    `      spawnSync({ args: ['sync', '--auto', '--from-openclaw'] });\n` +
     `    } catch (_) {}\n` +
     `  });\n` +
     `}\n` +

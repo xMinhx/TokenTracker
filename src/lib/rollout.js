@@ -13,9 +13,25 @@ const BUCKET_SEPARATOR = "|";
 const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
 const CLAUDE_MEM_OBSERVER_PROJECT_REF =
   "https://local.tokentracker/claude-mem/observer-sessions";
+const PROJECT_ABSENT_CONTEXT_RESCAN_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_CODEX_COLD_SKIP_RECENT_DAYS = 2;
 
-async function listRolloutFiles(sessionsDir) {
+async function listRolloutFiles(sessionsDir, options = {}) {
   const out = [];
+  const dayInventoryCache =
+    options?.dayInventoryCache && typeof options.dayInventoryCache === "object"
+      ? options.dayInventoryCache
+      : null;
+  const stats = options?.stats && typeof options.stats === "object" ? options.stats : null;
+  if (dayInventoryCache) {
+    if (dayInventoryCache.version !== 1) {
+      dayInventoryCache.days = {};
+    }
+    dayInventoryCache.version = 1;
+    if (!dayInventoryCache.days || typeof dayInventoryCache.days !== "object") {
+      dayInventoryCache.days = {};
+    }
+  }
   const years = await safeReadDir(sessionsDir);
   for (const y of years) {
     if (!/^[0-9]{4}$/.test(y.name) || !y.isDirectory()) continue;
@@ -28,18 +44,66 @@ async function listRolloutFiles(sessionsDir) {
       for (const d of days) {
         if (!/^[0-9]{2}$/.test(d.name) || !d.isDirectory()) continue;
         const dayDir = path.join(monthDir, d.name);
-        const files = await safeReadDir(dayDir);
-        for (const f of files) {
-          if (!f.isFile()) continue;
-          if (!f.name.startsWith("rollout-") || !f.name.endsWith(".jsonl")) continue;
-          out.push(path.join(dayDir, f.name));
-        }
+        const files = await listRolloutDayFiles(dayDir, { dayInventoryCache, stats });
+        out.push(...files);
       }
     }
   }
 
   out.sort((a, b) => a.localeCompare(b));
   return out;
+}
+
+async function listRolloutDayFiles(dayDir, { dayInventoryCache, stats } = {}) {
+  const cacheDays = dayInventoryCache?.days;
+  const dayStat = dayInventoryCache ? await fs.stat(dayDir).catch(() => null) : null;
+  const statKey = dayStat && dayStat.isDirectory() ? directoryInventoryStatKey(dayStat) : null;
+  const cached = cacheDays && cacheDays[dayDir];
+  if (
+    statKey &&
+    cached &&
+    typeof cached === "object" &&
+    cached.statKey === statKey &&
+    Array.isArray(cached.files) &&
+    cached.files.every(isRolloutFileName)
+  ) {
+    if (stats) stats.dayInventoryCacheHits = Number(stats.dayInventoryCacheHits || 0) + 1;
+    return cached.files.map((name) => path.join(dayDir, name));
+  }
+
+  if (stats && cached) stats.dayInventoryCacheMisses = Number(stats.dayInventoryCacheMisses || 0) + 1;
+  const entries = await safeReadDir(dayDir);
+  const files = [];
+  for (const f of entries) {
+    if (!f.isFile()) continue;
+    if (!isRolloutFileName(f.name)) continue;
+    files.push(f.name);
+  }
+  files.sort((a, b) => a.localeCompare(b));
+  if (cacheDays && statKey) {
+    cacheDays[dayDir] = {
+      statKey,
+      files,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  return files.map((name) => path.join(dayDir, name));
+}
+
+function isRolloutFileName(name) {
+  if (typeof name !== "string") return false;
+  if (name.includes("/") || name.includes("\\")) return false;
+  if (name !== path.basename(name)) return false;
+  return name.startsWith("rollout-") && name.endsWith(".jsonl");
+}
+
+function directoryInventoryStatKey(st) {
+  return [
+    Number(st.ino || 0),
+    Number(st.size || 0),
+    Number(st.mtimeMs || 0),
+    Number(st.ctimeMs || 0),
+  ].join(":");
 }
 
 // Collect rollout-*.jsonl at ANY depth under dir. listRolloutFiles requires the
@@ -119,6 +183,8 @@ async function parseRolloutIncremental({
   const projectTouchedBuckets = projectEnabled ? new Set() : null;
   const projectMetaCache = projectEnabled ? new Map() : null;
   const publicRepoCache = projectEnabled ? new Map() : null;
+  const projectFreshnessCache = projectEnabled ? new Map() : null;
+  const projectFreshnessNowMs = Date.now();
   const touchedBuckets = new Set();
   const defaultSource = normalizeSourceInput(source) || DEFAULT_SOURCE;
 
@@ -154,7 +220,29 @@ async function parseRolloutIncremental({
     const lastTotal = sameInode && !truncated ? prev.lastTotal || null : null;
     const lastModel = sameInode && !truncated ? prev.lastModel || null : null;
 
-    if (!projectEnabled && sameInode && !truncated && startOffset >= st.size) {
+    const codexProjectFastPath = projectEnabled && fileSource === DEFAULT_SOURCE;
+    const projectOffset = sameInode && !truncated ? Number(prev.projectOffset || 0) : 0;
+    const projectUpToDate =
+      codexProjectFastPath &&
+      typeof publicRepoResolver !== "function" &&
+      projectOffset >= st.size &&
+      (await isProjectFileContextFresh(prev?.projectFileContext, {
+        freshnessCache: projectFreshnessCache,
+        nowMs: projectFreshnessNowMs,
+      }));
+    const projectContextOnlyScan =
+      codexProjectFastPath &&
+      typeof publicRepoResolver !== "function" &&
+      sameInode &&
+      !truncated &&
+      startOffset >= st.size &&
+      !projectUpToDate;
+    if (
+      sameInode &&
+      !truncated &&
+      startOffset >= st.size &&
+      (!projectEnabled || projectUpToDate)
+    ) {
       if (cb) {
         cb({
           index: idx + 1,
@@ -180,33 +268,57 @@ async function parseRolloutIncremental({
     const projectRef = projectContext?.projectRef || null;
     const projectKey = projectContext?.projectKey || null;
 
-    const result = await parseRolloutFile({
-      filePath,
-      fileStat: st,
-      startOffset,
-      lastTotal,
-      lastModel,
-      hourlyState,
-      touchedBuckets,
-      source: fileSource,
-      projectState,
-      projectTouchedBuckets,
-      projectRef,
-      projectKey,
-      projectMetaCache,
-      publicRepoCache,
-      publicRepoResolver,
-      seenCodexEvents,
-      sessionId: codexSessionIdFromPath(filePath),
-    });
+    const result = projectContextOnlyScan
+      ? await scanRolloutProjectFileContexts({
+          filePath,
+          fileStat: st,
+          lastTotal,
+          lastModel,
+          projectState,
+          projectMetaCache,
+          publicRepoCache,
+          publicRepoResolver,
+          projectContext,
+        })
+      : await parseRolloutFile({
+          filePath,
+          fileStat: st,
+          startOffset,
+          lastTotal,
+          lastModel,
+          hourlyState,
+          touchedBuckets,
+          source: fileSource,
+          projectState,
+          projectTouchedBuckets,
+          projectRef,
+          projectKey,
+          projectMetaCache,
+          publicRepoCache,
+          publicRepoResolver,
+          projectContext,
+          seenCodexEvents,
+          sessionId: codexSessionIdFromPath(filePath),
+        });
 
-    cursors.files[key] = {
+    const nextCursor = {
       inode,
       offset: result.endOffset,
       lastTotal: result.lastTotal,
       lastModel: result.lastModel,
       updatedAt: new Date().toISOString(),
     };
+    if (codexProjectFastPath) {
+      nextCursor.projectOffset = result.endOffset;
+      nextCursor.projectFileContext = buildProjectFileContext(
+        result.projectFileContexts,
+        projectFreshnessNowMs,
+      );
+    } else if (Number.isFinite(prev?.projectOffset)) {
+      nextCursor.projectOffset = prev.projectOffset;
+      if (prev?.projectFileContext) nextCursor.projectFileContext = prev.projectFileContext;
+    }
+    cursors.files[key] = nextCursor;
 
     filesProcessed += 1;
     eventsAggregated += result.eventsAggregated;
@@ -236,6 +348,108 @@ async function parseRolloutIncremental({
   }
 
   return { filesProcessed, eventsAggregated, bucketsQueued, projectBucketsQueued };
+}
+
+async function filterColdCodexRolloutFiles({
+  rolloutFiles,
+  cursors,
+  projectEnabled = false,
+  auditDue = false,
+  nowMs = Date.now(),
+  recentDays = DEFAULT_CODEX_COLD_SKIP_RECENT_DAYS,
+} = {}) {
+  const files = Array.isArray(rolloutFiles) ? rolloutFiles : [];
+  if (auditDue || !cursors?.files || typeof cursors.files !== "object") {
+    return { rolloutFiles: files, skipped: 0 };
+  }
+
+  const activeDates = activeCodexRolloutDates(files, { nowMs, recentDays });
+  const freshnessCache = new Map();
+  const out = [];
+  let skipped = 0;
+
+  for (const entry of files) {
+    const filePath = typeof entry === "string" ? entry : entry?.path;
+    const source =
+      typeof entry === "string"
+        ? DEFAULT_SOURCE
+        : normalizeSourceInput(entry?.source) || DEFAULT_SOURCE;
+    if (!filePath || source !== DEFAULT_SOURCE) {
+      out.push(entry);
+      continue;
+    }
+
+    const rolloutDate = rolloutDateFromPath(filePath);
+    if (!rolloutDate || activeDates.has(rolloutDate)) {
+      out.push(entry);
+      continue;
+    }
+
+    const prev = cursors.files[filePath];
+    const cachedSize = Number(prev?.offset);
+    if (!Number.isFinite(cachedSize) || cachedSize <= 0) {
+      out.push(entry);
+      continue;
+    }
+
+    if (projectEnabled) {
+      const projectOffset = Number(prev?.projectOffset);
+      if (!Number.isFinite(projectOffset) || projectOffset < cachedSize) {
+        out.push(entry);
+        continue;
+      }
+      if (
+        !(await isProjectFileContextFresh(prev?.projectFileContext, {
+          freshnessCache,
+          nowMs,
+        }))
+      ) {
+        out.push(entry);
+        continue;
+      }
+    }
+
+    skipped += 1;
+  }
+
+  return { rolloutFiles: out, skipped };
+}
+
+function activeCodexRolloutDates(
+  rolloutFiles,
+  { nowMs = Date.now(), recentDays = DEFAULT_CODEX_COLD_SKIP_RECENT_DAYS } = {},
+) {
+  const active = new Set();
+  const days = Math.max(1, Math.floor(Number(recentDays) || 1));
+  const now = new Date(nowMs);
+  if (Number.isFinite(now.getTime())) {
+    for (let i = 0; i < days; i += 1) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      active.add(formatLocalDate(d));
+    }
+  }
+
+  let latest = null;
+  for (const entry of Array.isArray(rolloutFiles) ? rolloutFiles : []) {
+    const filePath = typeof entry === "string" ? entry : entry?.path;
+    const source =
+      typeof entry === "string"
+        ? DEFAULT_SOURCE
+        : normalizeSourceInput(entry?.source) || DEFAULT_SOURCE;
+    if (source !== DEFAULT_SOURCE) continue;
+    const rolloutDate = rolloutDateFromPath(filePath);
+    if (rolloutDate && (!latest || rolloutDate > latest)) latest = rolloutDate;
+  }
+  if (latest) active.add(latest);
+
+  return active;
+}
+
+function formatLocalDate(value) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 async function parseClaudeIncremental({
@@ -928,13 +1142,16 @@ async function parseRolloutFile({
   projectMetaCache,
   publicRepoCache,
   publicRepoResolver,
+  projectContext,
   seenCodexEvents,
   sessionId,
 }) {
   const st = fileStat || (await fs.stat(filePath));
   const endOffset = st.size;
+  const projectFileContexts = [];
+  addProjectFileContext(projectFileContexts, projectContext);
   if (startOffset >= endOffset) {
-    return { endOffset, lastTotal, lastModel, eventsAggregated: 0 };
+    return { endOffset, lastTotal, lastModel, eventsAggregated: 0, projectFileContexts };
   }
 
   const stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset });
@@ -996,6 +1213,7 @@ async function parseRolloutFile({
           currentCwd = nextCwd;
           currentProjectRef = context?.projectRef || null;
           currentProjectKey = context?.projectKey || null;
+          addProjectFileContext(projectFileContexts, context);
         }
       }
       continue;
@@ -1066,7 +1284,73 @@ async function parseRolloutFile({
     eventsAggregated += 1;
   }
 
-  return { endOffset, lastTotal: totals, lastModel: model, eventsAggregated };
+  return { endOffset, lastTotal: totals, lastModel: model, eventsAggregated, projectFileContexts };
+}
+
+async function scanRolloutProjectFileContexts({
+  filePath,
+  fileStat,
+  lastTotal,
+  lastModel,
+  projectState,
+  projectMetaCache,
+  publicRepoCache,
+  publicRepoResolver,
+  projectContext,
+}) {
+  const st = fileStat || (await fs.stat(filePath));
+  const endOffset = st.size;
+  const projectFileContexts = [];
+  addProjectFileContext(projectFileContexts, projectContext);
+  if (!projectState || endOffset <= 0) {
+    return { endOffset, lastTotal, lastModel, eventsAggregated: 0, projectFileContexts };
+  }
+
+  const stream = fssync.createReadStream(filePath, { encoding: "utf8", start: 0 });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  let currentCwd = null;
+
+  for await (const line of rl) {
+    if (
+      !line ||
+      !(
+        line.includes('"turn_context"') ||
+        line.includes('"session_meta"')
+      ) ||
+      !line.includes('"cwd"')
+    ) {
+      continue;
+    }
+
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch (_e) {
+      continue;
+    }
+    if (
+      (obj?.type !== "turn_context" && obj?.type !== "session_meta") ||
+      !obj?.payload ||
+      typeof obj.payload !== "object" ||
+      typeof obj.payload.cwd !== "string"
+    ) {
+      continue;
+    }
+
+    const nextCwd = obj.payload.cwd.trim();
+    if (!nextCwd || nextCwd === currentCwd) continue;
+    const context = await resolveProjectContextForPath({
+      startDir: nextCwd,
+      projectMetaCache,
+      publicRepoCache,
+      publicRepoResolver,
+      projectState,
+    });
+    currentCwd = nextCwd;
+    addProjectFileContext(projectFileContexts, context);
+  }
+
+  return { endOffset, lastTotal, lastModel, eventsAggregated: 0, projectFileContexts };
 }
 
 async function parseClaudeFile({
@@ -2135,9 +2419,9 @@ async function resolveProjectMetaForPath(startDir, cache) {
 
     const configPath = await resolveGitConfigPath(current);
     if (configPath) {
+      const configStat = await fs.stat(configPath).catch(() => null);
       const remoteUrl = await readGitRemoteUrl(configPath);
       const projectRef = canonicalizeProjectRef(remoteUrl);
-      const configStat = await fs.stat(configPath).catch(() => null);
       const meta = {
         projectRef: projectRef || null,
         repoRoot: current,
@@ -2162,6 +2446,86 @@ async function resolveProjectMetaForPath(startDir, cache) {
     for (const entry of visited) cache.set(entry, null);
   }
   return null;
+}
+
+function addProjectFileContext(contexts, projectContext) {
+  if (!Array.isArray(contexts) || !projectContext || typeof projectContext !== "object") return;
+  const configPath =
+    typeof projectContext.configPath === "string" && projectContext.configPath
+      ? projectContext.configPath
+      : null;
+  if (!configPath) return;
+  contexts.push(projectContext);
+}
+
+function buildProjectFileContext(projectContexts, checkedAtMs = Date.now()) {
+  const contexts = Array.isArray(projectContexts)
+    ? projectContexts
+    : projectContexts && typeof projectContexts === "object"
+      ? [projectContexts]
+      : [];
+  const seen = new Set();
+  const configs = [];
+  for (const context of contexts) {
+    const configPath =
+      typeof context?.configPath === "string" && context.configPath ? context.configPath : null;
+    if (!configPath || seen.has(configPath)) continue;
+    seen.add(configPath);
+    configs.push({
+      configPath,
+      configMtimeMs: Number.isFinite(context.configMtimeMs) ? context.configMtimeMs : null,
+      configSize: Number.isFinite(context.configSize) ? context.configSize : null,
+    });
+  }
+  if (configs.length === 0) return { absent: true, checkedAtMs };
+  if (configs.length > 1) return { configs };
+  const [config] = configs;
+  return {
+    ...config,
+    configs,
+  };
+}
+
+async function isProjectFileContextFresh(projectFileContext, options = {}) {
+  if (!projectFileContext || typeof projectFileContext !== "object") return false;
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+  const absentTtlMs = Number.isFinite(options.absentTtlMs)
+    ? options.absentTtlMs
+    : PROJECT_ABSENT_CONTEXT_RESCAN_MS;
+  const freshnessCache =
+    options.freshnessCache && typeof options.freshnessCache === "object"
+      ? options.freshnessCache
+      : null;
+  if (projectFileContext.absent === true) {
+    const checkedAtMs = Number(projectFileContext.checkedAtMs);
+    return Number.isFinite(checkedAtMs) && checkedAtMs > 0 && nowMs - checkedAtMs < absentTtlMs;
+  }
+  if (Array.isArray(projectFileContext.configs)) {
+    if (projectFileContext.configs.length === 0) return false;
+    for (const config of projectFileContext.configs) {
+      if (!(await isSingleProjectConfigFresh(config, freshnessCache))) return false;
+    }
+    return true;
+  }
+  return isSingleProjectConfigFresh(projectFileContext, freshnessCache);
+}
+
+async function isSingleProjectConfigFresh(projectFileContext, freshnessCache = null) {
+  const configPath =
+    typeof projectFileContext.configPath === "string" ? projectFileContext.configPath : null;
+  if (!configPath) return false;
+  let st;
+  if (freshnessCache && freshnessCache.has(configPath)) {
+    st = freshnessCache.get(configPath);
+  } else {
+    st = await fs.stat(configPath).catch(() => null);
+    if (freshnessCache) freshnessCache.set(configPath, st);
+  }
+  if (!st || !st.isFile()) return false;
+  return (
+    st.mtimeMs === projectFileContext.configMtimeMs &&
+    st.size === projectFileContext.configSize
+  );
 }
 
 function hashRepoRoot(repoRoot) {
@@ -2283,6 +2647,9 @@ async function resolveProjectContextForPath({
     projectKey: meta?.projectKey || null,
     status: meta?.status || "blocked",
     repoRootHash: meta?.repoRootHash || repoRootHash,
+    configPath: projectMeta.configPath || null,
+    configMtimeMs: projectMeta.configMtimeMs ?? null,
+    configSize: projectMeta.configSize ?? null,
   };
   recordProjectMeta(projectState, normalized);
   const configFields = {
@@ -9472,6 +9839,7 @@ module.exports = {
   listRolloutFiles,
   listRolloutFilesDeep,
   codexSessionIdFromPath,
+  filterColdCodexRolloutFiles,
   listClaudeProjectFiles,
   listGeminiSessionFiles,
   listOpencodeMessageFiles,

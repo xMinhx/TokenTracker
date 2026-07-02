@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const {
+  cmdSync,
   repairCodexRescanInflation,
   CODEX_RESCAN_DEDUP_REPAIR_KEY,
 } = require("../src/commands/sync");
@@ -21,22 +22,35 @@ function tokenCountLine({ ts, last, total }) {
   });
 }
 
+function turnContextLine({ cwd, model = "gpt-4" }) {
+  return JSON.stringify({
+    type: "turn_context",
+    payload: { cwd, model },
+  });
+}
+
 // Two cumulative events in one half-hour: deltas 100 + 150 → true codex total 250.
 const U1 = { input_tokens: 60, cached_input_tokens: 0, output_tokens: 40, reasoning_output_tokens: 0, total_tokens: 100 };
 const T2 = { input_tokens: 150, cached_input_tokens: 0, output_tokens: 100, reasoning_output_tokens: 0, total_tokens: 250 };
 const U2 = { input_tokens: 90, cached_input_tokens: 0, output_tokens: 60, reasoning_output_tokens: 0, total_tokens: 150 };
 const TRUE_CODEX_TOTAL = 250;
 
-async function writeCodexFile(home, uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee") {
+async function writeCodexFile(
+  home,
+  uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  opts = {},
+) {
   const dir = path.join(home, ".codex", "sessions", "2025", "12", "17");
   await fs.mkdir(dir, { recursive: true });
   const fp = path.join(dir, `rollout-2025-12-17T00-00-00-${uuid}.jsonl`);
+  const lines = [
+    tokenCountLine({ ts: "2025-12-17T00:00:00.000Z", last: U1, total: U1 }),
+    tokenCountLine({ ts: "2025-12-17T00:00:01.000Z", last: U2, total: T2 }),
+  ];
+  if (opts.cwd) lines.unshift(turnContextLine({ cwd: opts.cwd, model: opts.model }));
   await fs.writeFile(
     fp,
-    [
-      tokenCountLine({ ts: "2025-12-17T00:00:00.000Z", last: U1, total: U1 }),
-      tokenCountLine({ ts: "2025-12-17T00:00:01.000Z", last: U2, total: T2 }),
-    ].join("\n") + "\n",
+    lines.join("\n") + "\n",
     "utf8",
   );
   return fp;
@@ -60,7 +74,103 @@ const queueRowsBySource = async (queuePath) => {
   return m;
 };
 
+const projectBucketTotal = (cursors, source = "codex") =>
+  Object.entries(cursors.projectHourly?.buckets || {})
+    .filter(([, v]) => v?.source === source)
+    .reduce((s, [, v]) => s + Number(v.totals?.total_tokens || 0), 0);
+
+async function withTempSyncEnv(fn) {
+  const home = await makeTempHome();
+  const saved = {
+    HOME: process.env.HOME,
+    CODEX_HOME: process.env.CODEX_HOME,
+    CODE_HOME: process.env.CODE_HOME,
+    GEMINI_HOME: process.env.GEMINI_HOME,
+    OPENCODE_HOME: process.env.OPENCODE_HOME,
+    TOKENTRACKER_DEVICE_TOKEN: process.env.TOKENTRACKER_DEVICE_TOKEN,
+    TOKENTRACKER_AUTO_RETRY_NO_SPAWN: process.env.TOKENTRACKER_AUTO_RETRY_NO_SPAWN,
+  };
+  try {
+    process.env.HOME = home;
+    process.env.CODEX_HOME = path.join(home, ".codex");
+    process.env.CODE_HOME = path.join(home, ".code");
+    process.env.GEMINI_HOME = path.join(home, ".gemini");
+    process.env.OPENCODE_HOME = path.join(home, ".opencode");
+    process.env.TOKENTRACKER_DEVICE_TOKEN = "test-device-token";
+    process.env.TOKENTRACKER_AUTO_RETRY_NO_SPAWN = "1";
+    return await fn(home);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await fs.rm(home, { recursive: true, force: true });
+  }
+}
+
 describe("repairCodexRescanInflation (#187) — atomic guarded rebuild", () => {
+  it("does not treat project.queue.jsonl as cloud upload backlog", async () => {
+    await withTempSyncEnv(async (home) => {
+      const trackerDir = path.join(home, ".tokentracker", "tracker");
+      await fs.mkdir(trackerDir, { recursive: true });
+      await fs.writeFile(path.join(trackerDir, "queue.jsonl"), "", "utf8");
+      await fs.writeFile(path.join(trackerDir, "queue.state.json"), JSON.stringify({ offset: 0 }), "utf8");
+      await fs.writeFile(
+        path.join(trackerDir, "cursors.json"),
+        JSON.stringify({
+          version: 1,
+          files: {},
+          migrations: {
+            cloudConversationsBackfill_2026_06: { appliedAt: "2026-01-01T00:00:00.000Z" },
+            claudeGroundTruthRepair_2026_05_v4: { appliedAt: "2026-01-01T00:00:00.000Z" },
+          },
+        }),
+        "utf8",
+      );
+      await fs.writeFile(
+        path.join(trackerDir, "project.queue.jsonl"),
+        JSON.stringify({
+          project_ref: "https://github.com/acme/alpha",
+          project_key: "acme/alpha",
+          source: "codex",
+          hour_start: "2025-12-17T00:00:00.000Z",
+          total_tokens: 250,
+        }) + "\n",
+        "utf8",
+      );
+      await fs.writeFile(
+        path.join(trackerDir, "project.queue.state.json"),
+        JSON.stringify({ offset: 0 }),
+        "utf8",
+      );
+
+      let stdout = "";
+      const write = process.stdout.write;
+      process.stdout.write = function capture(chunk, ...args) {
+        stdout += String(chunk);
+        return true;
+      };
+      try {
+        await cmdSync([]);
+      } finally {
+        process.stdout.write = write;
+      }
+
+      assert.match(stdout, /Sync finished:/);
+      assert.doesNotMatch(stdout, /Remaining:/);
+      const retryPath = path.join(trackerDir, "auto.retry.json");
+      await assert.rejects(fs.stat(retryPath), { code: "ENOENT" });
+
+      await fs.writeFile(
+        path.join(trackerDir, "upload.throttle.json"),
+        JSON.stringify({ nextAllowedAtMs: Date.now() + 60_000 }),
+        "utf8",
+      );
+      await cmdSync(["--auto"]);
+      await assert.rejects(fs.stat(retryPath), { code: "ENOENT" });
+    });
+  });
+
   it("rebuilds inflated codex to the true value, preserves other sources, strips+rebuilds the queue, resets the offset", async () => {
     const home = await makeTempHome();
     try {
@@ -125,6 +235,461 @@ describe("repairCodexRescanInflation (#187) — atomic guarded rebuild", () => {
         false,
       );
       assert.equal(codexBucketTotal(cursors), TRUE_CODEX_TOTAL);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("rebuilds Codex project usage during rescan repair", async () => {
+    const home = await makeTempHome();
+    try {
+      const repoRoot = path.join(home, "work", "alpha");
+      await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+      await fs.writeFile(
+        path.join(repoRoot, ".git", "config"),
+        `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+        "utf8",
+      );
+      const codexFile = await writeCodexFile(home, undefined, { cwd: repoRoot, model: "gpt-4" });
+      const hour = "2025-12-17T00:00:00.000Z";
+      const projectRef = "https://github.com/acme/alpha";
+      const projectKey = "acme/alpha";
+      const projectBucketKey = `${projectKey}|codex|${hour}`;
+      const claudeProjectBucketKey = `${projectKey}|claude|${hour}`;
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      const projectQueuePath = path.join(home, "project.queue.jsonl");
+      const projectQueueStatePath = path.join(home, "project.queue.state.json");
+
+      await fs.writeFile(
+        queuePath,
+        [
+          JSON.stringify({ source: "codex", model: "gpt-4", hour_start: hour, total_tokens: 750 }),
+          JSON.stringify({ source: "claude", model: "opus", hour_start: hour, total_tokens: 5000 }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      await fs.writeFile(
+        projectQueuePath,
+        [
+          JSON.stringify({
+            project_ref: projectRef,
+            project_key: projectKey,
+            source: "codex",
+            hour_start: hour,
+            total_tokens: 750,
+          }),
+          JSON.stringify({
+            project_ref: projectRef,
+            project_key: projectKey,
+            source: "claude",
+            hour_start: hour,
+            total_tokens: 5000,
+          }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 99999 }), "utf8");
+      await fs.writeFile(projectQueueStatePath, JSON.stringify({ offset: 88888 }), "utf8");
+
+      const cursors = {
+        hourly: {
+          buckets: {
+            "codex|gpt-4|2025-12-17T00:00:00.000Z": { totals: { total_tokens: 750 } },
+            "claude|opus|2025-12-17T00:00:00.000Z": { totals: { total_tokens: 5000 } },
+          },
+          groupQueued: {},
+        },
+        projectHourly: {
+          version: 2,
+          buckets: {
+            [projectBucketKey]: {
+              project_ref: projectRef,
+              project_key: projectKey,
+              source: "codex",
+              hour_start: hour,
+              totals: { total_tokens: 750 },
+            },
+            [claudeProjectBucketKey]: {
+              project_ref: projectRef,
+              project_key: projectKey,
+              source: "claude",
+              hour_start: hour,
+              totals: { total_tokens: 5000 },
+            },
+          },
+          projects: {
+            [projectKey]: { projectRef, projectKey, status: "public_verified" },
+          },
+        },
+        files: { [codexFile]: { inode: 1, offset: 5, lastTotal: { total_tokens: 750 } } },
+        codexHashes: ["stale:key"],
+        migrations: {},
+      };
+
+      const ran = await repairCodexRescanInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+        rolloutFiles: [{ path: codexFile, source: "codex" }],
+      });
+      assert.equal(ran, true);
+
+      assert.equal(codexBucketTotal(cursors), TRUE_CODEX_TOTAL);
+      assert.equal(projectBucketTotal(cursors, "codex"), TRUE_CODEX_TOTAL);
+      assert.equal(projectBucketTotal(cursors, "claude"), 5000);
+
+      const q = await queueRowsBySource(queuePath);
+      const pq = await queueRowsBySource(projectQueuePath);
+      assert.equal(q.codex.total, TRUE_CODEX_TOTAL);
+      assert.equal(q.claude.total, 5000);
+      assert.equal(pq.codex.total, TRUE_CODEX_TOTAL);
+      assert.equal(pq.claude.total, 5000);
+
+      assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 0);
+      assert.equal(JSON.parse(await fs.readFile(projectQueueStatePath, "utf8")).offset, 0);
+      assert.equal(cursors.files[codexFile].projectOffset, cursors.files[codexFile].offset);
+      assert.equal(
+        cursors.files[codexFile].projectFileContext.configPath.endsWith(".git/config"),
+        true,
+      );
+      assert.equal(cursors.projectHourly.projects[projectKey].status, "public_verified");
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("GUARD: skips without mutation when existing Codex project usage cannot be rebuilt", async () => {
+    const home = await makeTempHome();
+    try {
+      const codexFile = await writeCodexFile(home);
+      const hour = "2025-12-17T00:00:00.000Z";
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      const projectQueuePath = path.join(home, "project.queue.jsonl");
+      const projectQueueStatePath = path.join(home, "project.queue.state.json");
+      await fs.writeFile(
+        queuePath,
+        JSON.stringify({ source: "codex", model: "unknown", hour_start: hour, total_tokens: 750 }) +
+          "\n",
+        "utf8",
+      );
+      await fs.writeFile(
+        projectQueuePath,
+        JSON.stringify({
+          project_ref: "https://github.com/acme/alpha",
+          project_key: "acme/alpha",
+          source: "codex",
+          hour_start: hour,
+          total_tokens: 750,
+        }) + "\n",
+        "utf8",
+      );
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 123 }), "utf8");
+      await fs.writeFile(projectQueueStatePath, JSON.stringify({ offset: 456 }), "utf8");
+      const cursors = {
+        hourly: {
+          buckets: { "codex|unknown|2025-12-17T00:00:00.000Z": { totals: { total_tokens: 750 } } },
+          groupQueued: {},
+        },
+        projectHourly: {
+          version: 2,
+          buckets: {
+            "acme/alpha|codex|2025-12-17T00:00:00.000Z": {
+              project_ref: "https://github.com/acme/alpha",
+              project_key: "acme/alpha",
+              source: "codex",
+              hour_start: hour,
+              totals: { total_tokens: 750 },
+            },
+          },
+          projects: {},
+        },
+        files: { [codexFile]: { inode: 1, offset: 5 } },
+        codexHashes: ["keep:me"],
+        migrations: {},
+      };
+
+      const ran = await repairCodexRescanInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+        rolloutFiles: [{ path: codexFile, source: "codex" }],
+      });
+      assert.equal(ran, false);
+      assert.equal(codexBucketTotal(cursors), 750);
+      assert.equal(projectBucketTotal(cursors, "codex"), 750);
+      assert.equal((await queueRowsBySource(queuePath)).codex.total, 750);
+      assert.equal((await queueRowsBySource(projectQueuePath)).codex.total, 750);
+      assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 123);
+      assert.equal(JSON.parse(await fs.readFile(projectQueueStatePath, "utf8")).offset, 456);
+      assert.deepEqual(cursors.codexHashes, ["keep:me"]);
+      assert.equal(cursors.migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY], undefined);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("GUARD: skips without mutation when Codex project queue rows are malformed", async () => {
+    const home = await makeTempHome();
+    try {
+      const codexFile = await writeCodexFile(home);
+      const hour = "2025-12-17T00:00:00.000Z";
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      const projectQueuePath = path.join(home, "project.queue.jsonl");
+      const projectQueueStatePath = path.join(home, "project.queue.state.json");
+      const malformedProjectRow =
+        JSON.stringify({
+          project_ref: "https://github.com/acme/alpha",
+          source: "codex",
+          hour_start: hour,
+          total_tokens: 750,
+        }) + "\n";
+
+      await fs.writeFile(
+        queuePath,
+        JSON.stringify({ source: "codex", model: "unknown", hour_start: hour, total_tokens: 750 }) +
+          "\n",
+        "utf8",
+      );
+      await fs.writeFile(projectQueuePath, malformedProjectRow, "utf8");
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 123 }), "utf8");
+      await fs.writeFile(projectQueueStatePath, JSON.stringify({ offset: 456 }), "utf8");
+      const cursors = {
+        hourly: {
+          buckets: { "codex|unknown|2025-12-17T00:00:00.000Z": { totals: { total_tokens: 750 } } },
+          groupQueued: {},
+        },
+        files: { [codexFile]: { inode: 1, offset: 5 } },
+        codexHashes: ["keep:me"],
+        migrations: {},
+      };
+
+      const ran = await repairCodexRescanInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+        rolloutFiles: [{ path: codexFile, source: "codex" }],
+      });
+      assert.equal(ran, false);
+      assert.equal(codexBucketTotal(cursors), 750);
+      assert.equal(await fs.readFile(projectQueuePath, "utf8"), malformedProjectRow);
+      assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 123);
+      assert.equal(JSON.parse(await fs.readFile(projectQueueStatePath, "utf8")).offset, 456);
+      assert.deepEqual(cursors.codexHashes, ["keep:me"]);
+      assert.equal(cursors.migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY], undefined);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("GUARD: skips without mutation when Codex project rebuild is partial", async () => {
+    const home = await makeTempHome();
+    try {
+      const repoRoot = path.join(home, "work", "alpha");
+      await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+      await fs.writeFile(
+        path.join(repoRoot, ".git", "config"),
+        `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+        "utf8",
+      );
+      const alphaFile = await writeCodexFile(
+        home,
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        { cwd: repoRoot, model: "gpt-4" },
+      );
+      const betaFile = await writeCodexFile(home, "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee");
+      const hour = "2025-12-17T00:00:00.000Z";
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      const projectQueuePath = path.join(home, "project.queue.jsonl");
+      const projectQueueStatePath = path.join(home, "project.queue.state.json");
+      await fs.writeFile(
+        queuePath,
+        JSON.stringify({ source: "codex", model: "gpt-4", hour_start: hour, total_tokens: 1500 }) +
+          "\n",
+        "utf8",
+      );
+      await fs.writeFile(
+        projectQueuePath,
+        [
+          JSON.stringify({
+            project_ref: "https://github.com/acme/alpha",
+            project_key: "acme/alpha",
+            source: "codex",
+            hour_start: hour,
+            total_tokens: 750,
+          }),
+          JSON.stringify({
+            project_ref: "https://github.com/acme/beta",
+            project_key: "acme/beta",
+            source: "codex",
+            hour_start: hour,
+            total_tokens: 750,
+          }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 123 }), "utf8");
+      await fs.writeFile(projectQueueStatePath, JSON.stringify({ offset: 456 }), "utf8");
+      const cursors = {
+        hourly: {
+          buckets: { "codex|gpt-4|2025-12-17T00:00:00.000Z": { totals: { total_tokens: 1500 } } },
+          groupQueued: {},
+        },
+        projectHourly: {
+          version: 2,
+          buckets: {
+            "acme/alpha|codex|2025-12-17T00:00:00.000Z": {
+              project_ref: "https://github.com/acme/alpha",
+              project_key: "acme/alpha",
+              source: "codex",
+              hour_start: hour,
+              totals: { total_tokens: 750 },
+            },
+            "acme/beta|codex|2025-12-17T00:00:00.000Z": {
+              project_ref: "https://github.com/acme/beta",
+              project_key: "acme/beta",
+              source: "codex",
+              hour_start: hour,
+              totals: { total_tokens: 750 },
+            },
+          },
+          projects: {},
+        },
+        files: {
+          [alphaFile]: { inode: 1, offset: 5 },
+          [betaFile]: { inode: 2, offset: 5 },
+        },
+        codexHashes: ["keep:me"],
+        migrations: {},
+      };
+
+      const ran = await repairCodexRescanInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+        rolloutFiles: [
+          { path: alphaFile, source: "codex" },
+          { path: betaFile, source: "codex" },
+        ],
+      });
+      assert.equal(ran, false);
+      assert.equal(codexBucketTotal(cursors), 1500);
+      assert.equal(projectBucketTotal(cursors, "codex"), 1500);
+      assert.equal((await queueRowsBySource(queuePath)).codex.total, 1500);
+      assert.equal((await queueRowsBySource(projectQueuePath)).codex.total, 1500);
+      assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 123);
+      assert.equal(JSON.parse(await fs.readFile(projectQueueStatePath, "utf8")).offset, 456);
+      assert.deepEqual(cursors.codexHashes, ["keep:me"]);
+      assert.equal(cursors.migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY], undefined);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("GUARD: skips without mutation when Codex project rebuild lowers an existing key without main repair", async () => {
+    const home = await makeTempHome();
+    try {
+      const repoRoot = path.join(home, "work", "alpha");
+      await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+      await fs.writeFile(
+        path.join(repoRoot, ".git", "config"),
+        `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+        "utf8",
+      );
+      const alphaFile = await writeCodexFile(
+        home,
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        { cwd: repoRoot, model: "gpt-4" },
+      );
+      const betaFile = await writeCodexFile(
+        home,
+        "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee",
+        { model: "gpt-4" },
+      );
+      const hour = "2025-12-17T00:00:00.000Z";
+      const projectRef = "https://github.com/acme/alpha";
+      const projectKey = "acme/alpha";
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      const projectQueuePath = path.join(home, "project.queue.jsonl");
+      const projectQueueStatePath = path.join(home, "project.queue.state.json");
+
+      await fs.writeFile(
+        queuePath,
+        JSON.stringify({ source: "codex", model: "gpt-4", hour_start: hour, total_tokens: 500 }) +
+          "\n",
+        "utf8",
+      );
+      await fs.writeFile(
+        projectQueuePath,
+        JSON.stringify({
+          project_ref: projectRef,
+          project_key: projectKey,
+          source: "codex",
+          hour_start: hour,
+          total_tokens: 500,
+        }) + "\n",
+        "utf8",
+      );
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 123 }), "utf8");
+      await fs.writeFile(projectQueueStatePath, JSON.stringify({ offset: 456 }), "utf8");
+      const cursors = {
+        hourly: {
+          buckets: { "codex|gpt-4|2025-12-17T00:00:00.000Z": { totals: { total_tokens: 500 } } },
+          groupQueued: {},
+        },
+        projectHourly: {
+          version: 2,
+          buckets: {
+            "acme/alpha|codex|2025-12-17T00:00:00.000Z": {
+              project_ref: projectRef,
+              project_key: projectKey,
+              source: "codex",
+              hour_start: hour,
+              totals: { total_tokens: 500 },
+            },
+          },
+          projects: {},
+        },
+        files: {
+          [alphaFile]: { inode: 1, offset: 5 },
+          [betaFile]: { inode: 2, offset: 5 },
+        },
+        codexHashes: ["keep:me"],
+        migrations: {},
+      };
+
+      const ran = await repairCodexRescanInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+        rolloutFiles: [
+          { path: alphaFile, source: "codex" },
+          { path: betaFile, source: "codex" },
+        ],
+      });
+      assert.equal(ran, false);
+      assert.equal(codexBucketTotal(cursors), 500);
+      assert.equal(projectBucketTotal(cursors, "codex"), 500);
+      assert.equal((await queueRowsBySource(queuePath)).codex.total, 500);
+      assert.equal((await queueRowsBySource(projectQueuePath)).codex.total, 500);
+      assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 123);
+      assert.equal(JSON.parse(await fs.readFile(projectQueueStatePath, "utf8")).offset, 456);
+      assert.deepEqual(cursors.codexHashes, ["keep:me"]);
+      assert.equal(cursors.migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY], undefined);
     } finally {
       await fs.rm(home, { recursive: true, force: true });
     }
@@ -291,6 +856,51 @@ describe("repairCodexRescanInflation (#187) — atomic guarded rebuild", () => {
 
       assert.equal(ran, false, "an unreproducible deleted session must defer the repair");
       assert.equal(codexBucketTotal(cursors), 750, "nothing mutated");
+      assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 88);
+      assert.deepEqual(cursors.codexHashes, ["keep:me"]);
+      assert.equal(cursors.migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY].skipped, true);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("GUARD recognizes Windows-style stale Codex cursor paths", async () => {
+    const home = await makeTempHome();
+    try {
+      const codexFile = await writeCodexFile(home);
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      await fs.writeFile(
+        queuePath,
+        JSON.stringify({
+          source: "codex",
+          model: "unknown",
+          hour_start: "2025-12-17T00:00:00.000Z",
+          total_tokens: 750,
+        }) + "\n",
+        "utf8",
+      );
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 88 }), "utf8");
+      const deletedWindowsPath =
+        "C:\\Users\\me\\.codex\\sessions\\2025\\12\\10\\rollout-2025-12-10T00-00-00-99999999-9999-9999-9999-999999999999.jsonl";
+      const cursors = {
+        hourly: {
+          buckets: { "codex|unknown|2025-12-17T00:00:00.000Z": { totals: { total_tokens: 750 } } },
+          groupQueued: {},
+        },
+        files: { [codexFile]: { inode: 1, offset: 5 }, [deletedWindowsPath]: { inode: 2, offset: 5 } },
+        codexHashes: ["keep:me"],
+        migrations: {},
+      };
+
+      const ran = await repairCodexRescanInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        rolloutFiles: [{ path: codexFile, source: "codex" }],
+      });
+      assert.equal(ran, false);
+      assert.equal(codexBucketTotal(cursors), 750);
       assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 88);
       assert.deepEqual(cursors.codexHashes, ["keep:me"]);
       assert.equal(cursors.migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY].skipped, true);
