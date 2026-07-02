@@ -2673,30 +2673,6 @@ async function resolveProjectContextForPath({
   };
 }
 
-// Builds a small, cursor-persistable freshness fingerprint for a resolved
-// project context's git config file, so a later sync can tell whether the
-// resolution is still valid without re-walking the filesystem.
-function buildProjectFileContext(context) {
-  const configPath = typeof context?.configPath === "string" ? context.configPath : null;
-  if (!configPath) return { absent: true };
-  return {
-    configPath,
-    configMtimeMs: Number.isFinite(context.configMtimeMs) ? context.configMtimeMs : null,
-    configSize: Number.isFinite(context.configSize) ? context.configSize : null,
-  };
-}
-
-async function isProjectFileContextFresh(projectFileContext) {
-  if (!projectFileContext || typeof projectFileContext !== "object") return false;
-  if (projectFileContext.absent === true) return false;
-  const configPath =
-    typeof projectFileContext.configPath === "string" ? projectFileContext.configPath : null;
-  if (!configPath) return false;
-  const st = await fs.stat(configPath).catch(() => null);
-  if (!st || !st.isFile()) return false;
-  return st.mtimeMs === projectFileContext.configMtimeMs && st.size === projectFileContext.configSize;
-}
-
 // Claude Code session files log the launch cwd on message lines (top-level
 // "cwd" field) — unlike the file's on-disk location under
 // ~/.claude/projects/<dash-encoded-cwd>/, which is not itself inside the
