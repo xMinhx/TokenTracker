@@ -2,7 +2,7 @@
 
 # Token Tracker
 
-[English](./README.md) · [简体中文](./README.zh-CN.md) · [日本語](./README.ja.md) · **한국어**
+[English](./README.md) · [简体中文](./README.zh-CN.md) · [日本語](./README.ja.md) · **한국어** · [Deutsch](./README.de.md)
 
 ### 모든 CLI에서 AI에 쓰는 비용을 정확히 파악
 
