@@ -57,6 +57,7 @@ const {
 const { purgeProjectUsage } = require("../src/lib/project-usage-purge");
 
 const { mockPlatform, mockMethod } = require("./helpers/mock");
+const { resetWslProbeCache } = require("../src/lib/wsl-probe");
 
 const antigravityTestTokens = (text) => estimateAntigravityTokens(text || "");
 
@@ -4769,6 +4770,7 @@ test("Zed wsl-only does not return or stat native Windows DB", (t) => {
 });
 
 test("Goose wsl-only does not return or stat native Windows candidates", (t) => {
+  resetWslProbeCache();
   mockPlatform(t, "win32");
   mockMethod(t, cp, "execFileSync", () => { throw new Error("wsl unavailable"); });
   mockMethod(t, fssync, "existsSync", (candidate) => {
@@ -4787,6 +4789,7 @@ test("Goose wsl-only does not return or stat native Windows candidates", (t) => 
 });
 
 test("Kimi Code native-first prefers native home when WSL also exists", (t) => {
+  resetWslProbeCache();
   mockPlatform(t, "win32");
   mockWsl(t);
   mockMethod(t, fssync, "existsSync", (candidate) => (
@@ -4803,6 +4806,7 @@ test("Kimi Code native-first prefers native home when WSL also exists", (t) => {
 });
 
 test("Kimi Code wsl-first prefers WSL home when both sides exist", (t) => {
+  resetWslProbeCache();
   mockPlatform(t, "win32");
   mockWsl(t);
   mockMethod(t, fssync, "existsSync", (candidate) => (
