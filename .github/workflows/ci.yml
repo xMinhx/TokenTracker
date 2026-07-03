@@ -32,6 +32,11 @@ jobs:
             package-lock.json
             dashboard/package-lock.json
 
+      - name: Install sqlite3 (defensive — preinstalled on GH runners but explicit dep hygiene)
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y sqlite3
+
       - name: Install root dependencies
         run: npm ci
 
