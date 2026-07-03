@@ -7,24 +7,21 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
+const root = path.resolve(__dirname, "..");
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "tt-dual-test-"));
 const nativeDir = path.join(tmpDir, "native", "hermes");
 const wslDir = path.join(tmpDir, "wsl", "hermes");
 const queuePath = path.join(tmpDir, "queue.jsonl");
-let exitCode = 0;
 
-function cleanup() {
-  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { }
-}
+async function main() {
+  try {
+    console.log("=== WSL Dual-Install Test ===\n");
 
-try {
-  console.log("=== WSL Dual-Install Test ===\n");
-
-  // ── 1. Create SQLite databases ──
-  fs.mkdirSync(nativeDir, { recursive: true });
-  fs.mkdirSync(wslDir, { recursive: true });
-  const nativeDb = path.join(nativeDir, "state.db");
-  const wslDb = path.join(wslDir, "state.db");
+    // ── 1. Create SQLite databases ──
+    fs.mkdirSync(nativeDir, { recursive: true });
+    fs.mkdirSync(wslDir, { recursive: true });
+    const nativeDb = path.join(nativeDir, "state.db");
+    const wslDb = path.join(wslDir, "state.db");
 
   const { DatabaseSync } = require("node:sqlite");
   const t = Math.floor(new Date("2026-01-01T10:30:00.000Z").getTime() / 1000);
@@ -58,7 +55,7 @@ try {
 
   // ── 2. Test resolver ──
   console.log("\n--- Resolver test ---");
-  const { resolveInstallPaths } = require("./src/lib/install-resolver");
+  const { resolveInstallPaths } = require(path.join(root, "src/lib/install-resolver"));
   const paths = resolveInstallPaths("hermes", {
     nativeValue: nativeDir,
     wslValue: wslDir,
@@ -73,8 +70,8 @@ try {
 
   // ── 3. Test parser through multiInstallParse ──
   console.log("\n--- Parser test ---");
-  const { multiInstallParse } = require("./src/lib/multi-install-parser");
-  const { parseHermesIncremental } = require("./src/lib/rollout");
+  const { multiInstallParse } = require(path.join(root, "src/lib/multi-install-parser"));
+  const { parseHermesIncremental } = require(path.join(root, "src/lib/rollout"));
   const cursors = { hourly: { buckets: {} } };
 
   const result = await multiInstallParse({
@@ -114,11 +111,13 @@ try {
   }
   console.log("\n  ALL PASS");
 
-} catch (err) {
-  console.error("\n  FAIL:", err.message);
-  exitCode = 1;
-} finally {
-  cleanup();
-  console.log("\nCleaned up:", tmpDir);
-  process.exit(exitCode);
+  } catch (err) {
+    console.error("\n  FAIL:", err.message);
+    process.exit(1);
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { }
+    console.log("\nCleaned up:", tmpDir);
+  }
 }
+
+main();
