@@ -101,6 +101,19 @@ enum Strings {
         formatter.setLocalizedDateFormatFromTemplate("MdHm")
         return formatter.string(from: date)
     }
+    /// Exact local reset instant appended to an explain-popover window line,
+    /// e.g. "Resets 7/6 18:00". Reuses the MdHm locale-aware formatter.
+    static func limitResetsAt(_ date: Date) -> String {
+        let time = codexResetBankExpiryDateTime(date)
+        return t("Resets \(time)", "重置于 \(time)", "重置於 \(time)", "\(time) にリセット", "\(time)에 초기화")
+    }
+    /// Hover tooltip for one reset-bank row: expiry instant + whole days left.
+    static func resetCreditExpiryDetail(expiry: String, daysLeft: Int) -> String {
+        if daysLeft <= 0 {
+            return t("Expires \(expiry) · today", "过期时间 \(expiry) · 今天", "過期時間 \(expiry) · 今天", "期限 \(expiry) · 今日", "만료 \(expiry) · 오늘")
+        }
+        return t("Expires \(expiry) · \(daysLeft)d left", "过期时间 \(expiry) · 剩 \(daysLeft) 天", "過期時間 \(expiry) · 剩 \(daysLeft) 天", "期限 \(expiry) · 残り \(daysLeft) 日", "만료 \(expiry) · \(daysLeft)일 남음")
+    }
     static func resetCreditAccessibility(label: String, expiry: String) -> String {
         t(
             "Reset credit \(label), expires \(expiry)",

@@ -51,6 +51,7 @@ export function buildResetBankRows(resetCredits, { now } = {}) {
       key: `reset-${index}`,
       label: copy("limits.codex_reset_bank.row_label", { index }),
       expiresAt: formatResetBankDateTime(expiresMs),
+      expiresMs,
       percent: lifetimePercent(parseMs(credit?.granted_at), expiresMs, nowMs),
     });
   }

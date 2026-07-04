@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
 import { Card } from "../../components";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
-import { copy } from "../../../lib/copy";
+import { copy, getCopyLocale } from "../../../lib/copy";
 import { LIMIT_DISPLAY_MODES } from "../../../hooks/use-limits-display-prefs.js";
 import {
   LIMIT_PROVIDER_IDS,
@@ -86,6 +86,35 @@ function paceForSpec(spec, mode) {
   });
 }
 
+function formatExactReset(ms) {
+  if (!Number.isFinite(ms)) return null;
+  return new Intl.DateTimeFormat(getCopyLocale(), {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(ms));
+}
+
+/**
+ * Hover detail for one window row: pace verdict + the exact local reset time
+ * (the bar itself only shows a compact relative countdown). Credits rows also
+ * get the raw used/limit/remaining amounts. Lines joined with \n — the
+ * Tooltip renders whitespace-pre-line.
+ */
+function buildWindowHoverDetail(spec, pace, mode) {
+  const lines = [explainLineFor(spec, pace, mode)];
+  const resetMs = resetToMs(readWindowReset(spec.window, spec.resetField));
+  const exact = formatExactReset(resetMs);
+  if (exact) lines.push(copy("limits.hover.resets_at", { time: exact }));
+  if (spec.key === "credits") {
+    const credits = buildCodexCreditDetail(spec.window);
+    if (credits) lines.push(credits);
+  }
+  return lines.join("\n");
+}
+
 /**
  * Small styled hover tooltip. Positions itself above the nearest ancestor
  * that has `group relative` on it — the caller owns that wrapper so this
@@ -98,7 +127,7 @@ function Tooltip({ text }) {
   return (
     <div
       role="tooltip"
-      className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-max max-w-[220px] -translate-x-1/2 rounded-xl border border-oai-gray-200/50 dark:border-oai-gray-800/50 bg-white/90 dark:bg-oai-gray-900/90 backdrop-blur-md px-2.5 py-1.5 text-[10.5px] leading-snug text-oai-gray-700 dark:text-oai-gray-200 shadow-xl opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+      className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-max max-w-[260px] -translate-x-1/2 whitespace-pre-line rounded-xl border border-oai-gray-200/50 dark:border-oai-gray-800/50 bg-white/90 dark:bg-oai-gray-900/90 backdrop-blur-md px-2.5 py-1.5 text-[10.5px] leading-snug text-oai-gray-700 dark:text-oai-gray-200 shadow-xl opacity-0 transition-opacity duration-150 group-hover:opacity-100"
     >
       {text}
     </div>
@@ -190,11 +219,20 @@ function LimitDetail({ rows, mode }) {
   // group's tint and lines up flush-left with the bars above.
   return (
     <div className="mt-1 flex flex-col gap-1">
-      {rows.map(({ spec, pace }) => (
-        <div key={spec.key} className="text-[11px] leading-snug text-oai-gray-600 dark:text-oai-gray-300">
-          {explainLineFor(spec, pace, mode)}
-        </div>
-      ))}
+      {rows.map(({ spec, pace }) => {
+        const exact = formatExactReset(resetToMs(readWindowReset(spec.window, spec.resetField)));
+        return (
+          <div key={spec.key} className="text-[11px] leading-snug text-oai-gray-600 dark:text-oai-gray-300">
+            {explainLineFor(spec, pace, mode)}
+            {exact ? (
+              <span className="text-oai-gray-400 dark:text-oai-gray-500">
+                {" · "}
+                {copy("limits.hover.resets_at", { time: exact })}
+              </span>
+            ) : null}
+          </div>
+        );
+      })}
       <div className="mt-1 pt-1.5 border-t border-oai-gray-200/70 dark:border-oai-gray-700/50 text-[10.5px] leading-snug text-oai-gray-400 dark:text-oai-gray-500">
         {copy(remaining ? "limits.explain.body_remaining" : "limits.explain.body")}
       </div>
@@ -279,7 +317,7 @@ function LimitWindowSection({ rows, mode, extra = null }) {
           mode={mode}
           pacePercent={pace.pacePercent}
           paceOver={pace.paceOver}
-          title={spec.key === "credits" ? buildCodexCreditDetail(spec.window) : null}
+          title={buildWindowHoverDetail(spec, pace, mode)}
         />
       ))}
       {showEmpty ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
@@ -288,10 +326,19 @@ function LimitWindowSection({ rows, mode, extra = null }) {
   );
 }
 
+function resetBankHoverDetail(row) {
+  if (!Number.isFinite(row.expiresMs)) return null;
+  const days = Math.floor((row.expiresMs - Date.now()) / 86400000);
+  if (days < 0) return null;
+  if (days === 0) return copy("limits.reset_bank.hover_detail_today", { date: row.expiresAt });
+  return copy("limits.reset_bank.hover_detail", { date: row.expiresAt, days });
+}
+
 function ResetBankRow({ row }) {
   const widthPct = Math.max(0, Math.min(100, Number(row.percent) || 0));
   return (
-    <div className="flex items-center gap-2" data-reset-bank-row="">
+    <div className="group relative flex items-center gap-2" data-reset-bank-row="">
+      <Tooltip text={resetBankHoverDetail(row)} />
       <span
         data-limit-label=""
         className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 shrink-0 whitespace-nowrap"

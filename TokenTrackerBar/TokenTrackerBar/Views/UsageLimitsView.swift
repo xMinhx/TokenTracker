@@ -212,9 +212,13 @@ struct UsageLimitsView: View {
                 guard let expiresAt = resetDate(iso: credit.expiresAt) else { return nil }
                 let label = Strings.codexResetBankLabel(index + 1)
                 let expiry = Strings.codexResetBankExpiryDateTime(expiresAt)
+                // Whole days until expiry — hover detail (#248). Matches the web
+                // tooltip: floor of the remaining time, 0 → "today".
+                let daysLeft = Int(floor(expiresAt.timeIntervalSinceNow / 86400))
                 return CodexResetRowSpec(
                     label: label,
                     expiry: expiry,
+                    detail: daysLeft < 0 ? nil : Strings.resetCreditExpiryDetail(expiry: expiry, daysLeft: daysLeft),
                     lifetimeRemainingPercent: resetLifetimeRemainingPercent(
                         grantedAt: resetDate(iso: credit.grantedAt),
                         expiresAt: expiresAt
@@ -421,6 +425,7 @@ struct UsageLimitsView: View {
                 .minimumScaleFactor(0.8)
                 .frame(width: Self.resetExpiryColumnWidth, alignment: .trailing)
         }
+        .help(row.detail ?? "")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.accessibilityLabel)
     }
@@ -651,6 +656,8 @@ private struct CodexResetRowSpec: Identifiable {
     var id: String { label }
     let label: String
     let expiry: String
+    /// Hover tooltip: expiry instant + days left. Nil once already expired.
+    let detail: String?
     let lifetimeRemainingPercent: Double
     let accessibilityLabel: String
 }
@@ -735,9 +742,15 @@ private struct LimitsExplainContent: View {
                 remainingMode: remainingMode
             )
         }
-        return Strings.limitWindowExplainLine(
+        var text = Strings.limitWindowExplainLine(
             label: spec.label, used: used, expected: pace.expectedPercent, over: pace.paceOver,
             runsOutEta: pace.runsOutEta, projectedEnd: pace.projectedEnd, remainingMode: remainingMode
         )
+        // Exact local reset instant (#248) — the row itself only shows a compact
+        // relative countdown, so the popover carries the precise time.
+        if let resetDate = spec.resetDate {
+            text += " · " + Strings.limitResetsAt(resetDate)
+        }
+        return text
     }
 }

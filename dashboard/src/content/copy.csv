@@ -572,6 +572,9 @@ limits.explain.remaining,ui,LimitsPage,UsageLimitsPanel,explain_remaining,"{{lab
 limits.explain.on_track_remaining,ui,LimitsPage,UsageLimitsPanel,explain_on_track_remaining,"{{label}}: on track, ~{{pct}}% left by reset",,active
 limits.explain.ahead_pct_remaining,ui,LimitsPage,UsageLimitsPanel,explain_ahead_pct_remaining,"{{label}}: ahead of pace, ~{{pct}}% left by reset",,active
 limits.explain.body_remaining,ui,LimitsPage,UsageLimitsPanel,explain_body_remaining,"The mark is the even-pace point; fill short of it means you're ahead.",,active
+limits.hover.resets_at,ui,LimitsPage,UsageLimitsPanel,hover_resets_at,"Resets {{time}}",,active
+limits.reset_bank.hover_detail,ui,LimitsPage,UsageLimitsPanel,reset_bank_hover_detail,"Expires {{date}} · {{days}}d left",,active
+limits.reset_bank.hover_detail_today,ui,LimitsPage,UsageLimitsPanel,reset_bank_hover_detail_today,"Expires {{date}} · today",,active
 limits.label.copilot_premium,ui,LimitsPage,UsageLimitsPanel,copilot_premium,"Premium",,active
 limits.label.copilot_chat,ui,LimitsPage,UsageLimitsPanel,copilot_chat,"Chat",,active
 limits.label.grok_month,ui,LimitsPage,UsageLimitsPanel,grok_month,"Month",,active
