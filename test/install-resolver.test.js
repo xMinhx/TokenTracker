@@ -48,7 +48,7 @@ test("resolveInstallPaths both mode single-install fallback", (t) => {
     const r = resolveInstallPaths(
       { nativeValue: nativeDir, wslValue: null },
       { TOKENTRACKER_WSL_MODE: "both" },
-      { runWsl: () => "Ubuntu\n", existsSync: () => false },
+      { runWsl: () => "Ubuntu\n", existsSync: (p) => p === nativeDir },
     );
     assert.equal(r.native, nativeDir);
     assert.equal(r.wsl, null);

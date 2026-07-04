@@ -92,7 +92,8 @@ test("multiInstallParse partial parse failure propagates error", async () => {
   await assert.rejects(
     () => multiInstallParse({
       paths: { native: "/a", wsl: "/b" },
-      parserFn: async ({ resolvedPath }) => {
+      parserFn: async ({ resolvedPath, cursors: c }) => {
+        if (resolvedPath === "/a") c.hermes = { done: true };
         if (resolvedPath === "/b") throw new Error("second install failed");
         return { recordsProcessed: 1 };
       },
@@ -103,7 +104,7 @@ test("multiInstallParse partial parse failure propagates error", async () => {
     { message: "second install failed" },
   );
 
-  assert.ok(cursors.hermes.native !== undefined, "first install's cursor should be preserved");
+  assert.deepEqual(cursors.hermes.native, { done: true }, "first install's cursor state should be preserved");
 });
 
 test("multiInstallParse empty install produces correct partial result", async () => {

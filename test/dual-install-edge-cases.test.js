@@ -18,9 +18,9 @@ test("edge: WSL probe failure in both mode falls back gracefully", (t) => {
     fs.writeFileSync(path.join(nativeDir, "state.db"), "fake db");
 
     const r = resolveInstallPaths(
-      { nativeValue: nativeDir, wslValue: null },
+      { nativeValue: nativeDir, wslDir: ".hermes" },
       { TOKENTRACKER_WSL_MODE: "both" },
-      { runWsl: () => { throw new Error("wsl not found"); }, existsSync: () => false },
+      { runWsl: () => { throw new Error("wsl not found"); }, existsSync: (p) => p === nativeDir },
     );
     assert.equal(r.native, nativeDir);
     assert.equal(r.wsl, null);
@@ -39,13 +39,13 @@ test("edge: both mode with single native install produces same result as non-bot
     const bothResult = resolveInstallPaths(
       { nativeValue: nativeDir, wslValue: null },
       { TOKENTRACKER_WSL_MODE: "both" },
-      { runWsl: () => { throw new Error("no wsl"); }, existsSync: () => false },
+      { runWsl: () => { throw new Error("no wsl"); }, existsSync: (p) => p === nativeDir },
     );
 
     const wslFirstResult = resolveInstallPaths(
       { nativeValue: nativeDir, wslValue: null },
       { TOKENTRACKER_WSL_MODE: "wsl-first" },
-      { runWsl: () => { throw new Error("no wsl"); }, existsSync: () => false },
+      { runWsl: () => { throw new Error("no wsl"); }, existsSync: (p) => p === nativeDir },
     );
 
     assert.equal(bothResult.native, nativeDir);

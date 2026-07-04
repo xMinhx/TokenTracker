@@ -20,7 +20,9 @@ async function multiInstallParse({ paths, parserFn, providerName, cursors, getPa
     });
   }
 
-  const ns = ensureNamespacedCursors(cursors, providerName);
+  const mode = wsl.getWslMode(env);
+  const legacyKey = mode === "native-first" || mode === "native-only" ? "native" : "wsl";
+  const ns = ensureNamespacedCursors(cursors, providerName, legacyKey);
   let recordsProcessed = 0;
   let eventsAggregated = 0;
   let bucketsQueued = 0;

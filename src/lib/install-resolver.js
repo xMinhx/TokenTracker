@@ -10,18 +10,13 @@ function resolveInstallPaths({ nativeValue, wslDir, wslValue } = {}, env = proce
     ? (wsl.shouldProbeWsl(env) ? wslValue : null)
     : (wslDir && wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(wslDir, { ...deps, env }) : null);
   const nativeCandidate = wsl.shouldProbeNative(env) && nativeValue
-    ? pathExists(nativeValue) : null;
+    ? pathExists(nativeValue, deps.existsSync) : null;
 
-  if (wsl.getWslMode(env) === "both") {
-    return { native: nativeCandidate, wsl: wslCandidate };
-  }
-
-  const single = wsl.pickWin32Path({ wslValue: wslCandidate, nativeValue: nativeCandidate, env, platform: "win32" });
-  return { native: single, wsl: null };
+  return wsl.resolveAllWin32Paths({ nativeValue: nativeCandidate, wslValue: wslCandidate, env, platform: "win32" });
 }
 
-function pathExists(p) {
-  try { return fssync.existsSync(p) ? p : null; } catch (_e) { return null; }
+function pathExists(p, existsSync) {
+  try { return (existsSync || fssync.existsSync)(p) ? p : null; } catch (_e) { return null; }
 }
 
 function ensureNamespacedCursors(cursors, providerName, activeKey = "wsl") {
