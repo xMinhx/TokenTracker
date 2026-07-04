@@ -14,6 +14,7 @@ const wslDir = path.join(tmpDir, "wsl", "hermes");
 const queuePath = path.join(tmpDir, "queue.jsonl");
 
 async function main() {
+  let exitCode = 0;
   try {
     console.log("=== WSL Dual-Install Test ===\n");
 
@@ -23,10 +24,17 @@ async function main() {
     const nativeDb = path.join(nativeDir, "state.db");
     const wslDb = path.join(wslDir, "state.db");
 
-  const { DatabaseSync } = require("node:sqlite");
+  let DatabaseSync;
+  try {
+    DatabaseSync = require("node:sqlite").DatabaseSync;
+  } catch (_e) {
+    DatabaseSync = null;
+  }
+
   const t = Math.floor(new Date("2026-01-01T10:30:00.000Z").getTime() / 1000);
 
   function createHermesDb(dbPath, sessions) {
+    if (!DatabaseSync) return;
     const db = new DatabaseSync(dbPath);
     db.exec(`CREATE TABLE sessions (
       id TEXT PRIMARY KEY, source TEXT, model TEXT,
@@ -56,7 +64,7 @@ async function main() {
   // ── 2. Test resolver ──
   console.log("\n--- Resolver test ---");
   const { resolveInstallPaths } = require(path.join(root, "src/lib/install-resolver"));
-  const paths = resolveInstallPaths("hermes", {
+  const paths = resolveInstallPaths({
     nativeValue: nativeDir,
     wslValue: wslDir,
   }, { ...process.env, TOKENTRACKER_WSL_MODE: "both" });
@@ -113,10 +121,11 @@ async function main() {
 
   } catch (err) {
     console.error("\n  FAIL:", err.message);
-    process.exit(1);
+    exitCode = 1;
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { }
     console.log("\nCleaned up:", tmpDir);
+    if (exitCode) process.exit(exitCode);
   }
 }
 
