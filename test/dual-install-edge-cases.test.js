@@ -17,7 +17,7 @@ test("edge: WSL probe failure in both mode falls back gracefully", (t) => {
     fs.mkdirSync(nativeDir, { recursive: true });
     fs.writeFileSync(path.join(nativeDir, "state.db"), "fake db");
 
-    const r = resolveInstallPaths("hermes",
+    const r = resolveInstallPaths(
       { nativeValue: nativeDir, wslValue: null },
       { TOKENTRACKER_WSL_MODE: "both" },
       { runWsl: () => { throw new Error("wsl not found"); }, existsSync: () => false },
@@ -36,13 +36,13 @@ test("edge: both mode with single native install produces same result as non-bot
     const nativeDir = path.join(tmpDir, "native");
     fs.mkdirSync(nativeDir, { recursive: true });
 
-    const bothResult = resolveInstallPaths("hermes",
+    const bothResult = resolveInstallPaths(
       { nativeValue: nativeDir, wslValue: null },
       { TOKENTRACKER_WSL_MODE: "both" },
       { runWsl: () => { throw new Error("no wsl"); }, existsSync: () => false },
     );
 
-    const wslFirstResult = resolveInstallPaths("hermes",
+    const wslFirstResult = resolveInstallPaths(
       { nativeValue: nativeDir, wslValue: null },
       { TOKENTRACKER_WSL_MODE: "wsl-first" },
       { runWsl: () => { throw new Error("no wsl"); }, existsSync: () => false },

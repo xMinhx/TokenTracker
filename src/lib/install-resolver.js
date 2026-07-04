@@ -1,7 +1,7 @@
 const fssync = require("node:fs");
 const wsl = require("./wsl-probe");
 
-function resolveInstallPaths(providerName, { nativeValue, wslDir, wslValue } = {}, env = process.env, deps = {}) {
+function resolveInstallPaths({ nativeValue, wslDir, wslValue } = {}, env = process.env, deps = {}) {
   if (process.platform !== "win32") {
     return { native: nativeValue ?? null, wsl: null };
   }

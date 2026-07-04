@@ -12,7 +12,7 @@ const wsl = require("../src/lib/wsl-probe");
 
 test("resolveInstallPaths returns single path on non-Windows", (t) => {
   mockPlatform(t, "linux");
-  const r = resolveInstallPaths("hermes", { nativeValue: "/home/user/.hermes", wslDir: ".hermes" }, {}, {});
+  const r = resolveInstallPaths({ nativeValue: "/home/user/.hermes", wslDir: ".hermes" }, {}, {});
   assert.equal(r.native, "/home/user/.hermes");
   assert.equal(r.wsl, null);
 });
@@ -26,7 +26,7 @@ test("resolveInstallPaths both mode returns both paths when both exist on Window
     fs.mkdirSync(nativeDir, { recursive: true });
     fs.mkdirSync(wslDir, { recursive: true });
 
-    const r = resolveInstallPaths("hermes",
+    const r = resolveInstallPaths(
       { nativeValue: nativeDir, wslValue: wslDir },
       { TOKENTRACKER_WSL_MODE: "both" },
       { runWsl: () => "Ubuntu\n", existsSync: () => true },
@@ -45,7 +45,7 @@ test("resolveInstallPaths both mode single-install fallback", (t) => {
     const nativeDir = path.join(tmpDir, "native");
     fs.mkdirSync(nativeDir, { recursive: true });
 
-    const r = resolveInstallPaths("hermes",
+    const r = resolveInstallPaths(
       { nativeValue: nativeDir, wslValue: null },
       { TOKENTRACKER_WSL_MODE: "both" },
       { runWsl: () => "Ubuntu\n", existsSync: () => false },
@@ -78,7 +78,7 @@ test("resolveInstallPaths non-both modes return single path with correct selecti
   ];
   for (const { mode, expected } of cases) {
     const env = mode ? { TOKENTRACKER_WSL_MODE: mode } : {};
-    const r = resolveInstallPaths("hermes",
+    const r = resolveInstallPaths(
       { nativeValue: nativeDir, wslValue: wslDir },
       env,
       { runWsl: () => "Ubuntu\n", existsSync: () => true },
@@ -103,14 +103,14 @@ test("ensureNamespacedCursors transparent for already-namespaced cursors", () =>
   assert.equal(ns.wsl.lastCompletedStartedAt, 0);
 });
 
-test("ensureNamespacedCursors migrates flat cursor to both namespaces", () => {
+test("ensureNamespacedCursors migrates flat cursor to active namespace only", () => {
   const cursors = {
     hermes: { lastCompletedStartedAt: 100, unfinishedSessionIds: ["abc"] },
   };
   const ns = ensureNamespacedCursors(cursors, "hermes");
-  assert.equal(ns.native.lastCompletedStartedAt, 100);
-  assert.deepEqual(ns.native.unfinishedSessionIds, ["abc"]);
-  assert.equal(ns.wsl.lastCompletedStartedAt, 100, "WSL namespace should also have the flat data");
+  assert.equal(ns.native.lastCompletedStartedAt, undefined, "non-active namespace starts empty");
+  assert.equal(ns.native.unfinishedSessionIds, undefined, "non-active namespace starts empty");
+  assert.equal(ns.wsl.lastCompletedStartedAt, 100, "active namespace gets flat data");
   assert.deepEqual(ns.wsl.unfinishedSessionIds, ["abc"]);
   assert.ok(ns === cursors.hermes, "cursors.hermes should be replaced with namespace object");
 });

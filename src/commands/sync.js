@@ -741,7 +741,7 @@ async function cmdSync(argv) {
         const nativeDb = path.join(appData, "goose", "sessions", "sessions.db");
         const wslDir = wsl.shouldProbeWsl(process.env) ? wsl.discoverWslHome(".local/share/goose/sessions") : null;
         const wslDb = wslDir ? path.join(wslDir, "sessions.db") : null;
-        const goosePaths = resolveInstallPaths("goose", { nativeValue: nativeDb, wslValue: wslDb });
+        const goosePaths = resolveInstallPaths({ nativeValue: nativeDb, wslValue: wslDb });
         if (goosePaths.native || goosePaths.wsl) {
           if (progress?.enabled) progress.start(`Parsing Goose ${renderBar(0)} 0 sessions | buckets 0`);
           try {
@@ -808,7 +808,7 @@ async function cmdSync(argv) {
         const nativeDb = path.join(local, "Zed", "threads", "threads.db");
         const wslThreadsDir = wsl.shouldProbeWsl(process.env) ? wsl.discoverWslHome(".local/share/zed/threads") : null;
         const wslDb = wslThreadsDir ? path.join(wslThreadsDir, "threads.db") : null;
-        const zedPaths = resolveInstallPaths("zed", { nativeValue: nativeDb, wslValue: wslDb });
+        const zedPaths = resolveInstallPaths({ nativeValue: nativeDb, wslValue: wslDb });
         if (zedPaths.native || zedPaths.wsl) {
           if (progress?.enabled) progress.start(`Parsing Zed Agent ${renderBar(0)} 0 threads | buckets 0`);
           try {
@@ -962,7 +962,7 @@ async function cmdSync(argv) {
         const defaultPath = path.join(home, ".hermes");
         const nativeValue = process.platform === "win32" && typeof process.env.LOCALAPPDATA === "string"
           ? path.join(process.env.LOCALAPPDATA.trim(), "hermes") : defaultPath;
-        const hermesPaths = resolveInstallPaths("hermes", { nativeValue, wslDir: ".hermes" });
+        const hermesPaths = resolveInstallPaths({ nativeValue, wslDir: ".hermes" });
         if (hermesPaths.native || hermesPaths.wsl) {
           if (progress?.enabled) {
             progress.start(`Parsing Hermes ${renderBar(0)} | buckets 0`);

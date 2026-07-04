@@ -3791,7 +3791,7 @@ function resolveHermesPath(env = process.env, deps = {}) {
   if (process.platform === "win32") {
     const localAppData = typeof env.LOCALAPPDATA === "string" ? env.LOCALAPPDATA.trim() : "";
     const nativeValue = localAppData.length > 0 ? path.join(localAppData, "hermes") : null;
-    const paths = resolveInstallPaths("hermes", { nativeValue, wslDir: ".hermes" }, env, deps);
+    const paths = resolveInstallPaths({ nativeValue, wslDir: ".hermes" }, env, deps);
     const picked = paths.native || paths.wsl;
     if (picked) return picked;
     const mode = wsl.getWslMode(env);
@@ -3828,12 +3828,12 @@ function discoverWslHermesHome(deps = {}) {
 }
 
 function pickWin32ProviderPath({ env = process.env, nativeValue, wslProviderDir, wslValue, deps = {} }) {
-  const paths = resolveInstallPaths("_", { nativeValue, wslDir: wslProviderDir, wslValue }, env, deps);
+  const paths = resolveInstallPaths({ nativeValue, wslDir: wslProviderDir, wslValue }, env, deps);
   return paths.native || paths.wsl;
 }
 
 function resolveAllWin32ProviderPaths({ env = process.env, nativeValue, wslProviderDir, wslValue, deps = {} }) {
-  return resolveInstallPaths("_", { nativeValue, wslDir: wslProviderDir, wslValue }, env, deps);
+  return resolveInstallPaths({ nativeValue, wslDir: wslProviderDir, wslValue }, env, deps);
 }
 
 function resolveHermesDbPath(env = process.env) {
@@ -6514,7 +6514,7 @@ function resolveZedDbPath(env = process.env) {
     const wslThreadsDir = wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(".local/share/zed/threads", { env }) : null;
     const wslDbPath = wslThreadsDir && fssync.existsSync(path.join(wslThreadsDir, "threads.db"))
       ? path.join(wslThreadsDir, "threads.db") : null;
-    const paths = resolveInstallPaths("zed", { nativeValue: native, wslValue: wslDbPath }, env);
+    const paths = resolveInstallPaths({ nativeValue: native, wslValue: wslDbPath }, env);
     const picked = paths.native || paths.wsl;
     if (picked) return picked;
     const mode = wsl.getWslMode(env);
@@ -6895,7 +6895,7 @@ function resolveGooseDbPath(env = process.env) {
     const wslDir = wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(".local/share/goose/sessions", { env }) : null;
     const wslValue = wslDir && fssync.existsSync(path.join(wslDir, "sessions.db"))
       ? path.join(wslDir, "sessions.db") : null;
-    const paths = resolveInstallPaths("goose", { nativeValue: native, wslValue }, env);
+    const paths = resolveInstallPaths({ nativeValue: native, wslValue }, env);
     const picked = paths.native || paths.wsl;
     if (picked) candidates.push(picked);
     for (const c of candidates) {
