@@ -38,12 +38,9 @@ test("property: multiInstallParse invariants hold across random inputs", async (
   for (let iter = 0; iter < 100; iter++) {
     const numInstalls = randomInt(rng, 1, 2);
     const numBuckets = randomInt(rng, 0, 10);
-    const hasPrefer = rng() > 0.5;
-    const preferVal = hasPrefer ? (rng() > 0.5 ? "native" : "wsl") : null;
     const installKeys = numInstalls === 2 ? { native: "/a", wsl: "/b" } : { native: "/a", wsl: null };
 
     const cursors = { hourly: { buckets: {} } };
-    const env = preferVal ? { TOKENTRACKER_WSL_PREFER: preferVal } : {};
 
     const result = await multiInstallParse({
       paths: installKeys,
@@ -71,7 +68,6 @@ test("property: multiInstallParse invariants hold across random inputs", async (
       },
       providerName: "test",
       cursors,
-      env,
       getParams: (p) => ({ path: p }),
       queuePath,
     });

@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 
 const { resolveInstallPaths, ensureNamespacedCursors } = require("../src/lib/install-resolver");
-const { getWslMode, getWslPrefer, resetWslProbeCache } = require("../src/lib/wsl-probe");
+const { getWslMode, resetWslProbeCache } = require("../src/lib/wsl-probe");
 const { multiInstallParse, emptyResult } = require("../src/lib/multi-install-parser");
 const { mockPlatform } = require("./helpers/mock");
 
@@ -84,12 +84,6 @@ test("edge: multiInstallParse handles WSL probe timeout graceful skip", async ()
     getParams: (path) => ({ hermesPath: path }),
   });
   assert.equal(r.recordsProcessed, 1);
-});
-
-test("edge: WSL_PREFER is null when unset, native/wsl when set", () => {
-  assert.equal(getWslPrefer({}), null);
-  assert.equal(getWslPrefer({ TOKENTRACKER_WSL_PREFER: "wsl" }), "wsl");
-  assert.equal(getWslPrefer({ TOKENTRACKER_WSL_PREFER: "native" }), "native");
 });
 
 test("edge: resetWslProbeCache cleans shared state", () => {

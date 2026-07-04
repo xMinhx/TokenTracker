@@ -122,7 +122,7 @@ test("ensureNamespacedCursors handles empty provider state", () => {
   assert.deepEqual(ns.wsl, {});
 });
 
-// ── wsl-probe: both mode and getWslPrefer ─────────────────────────────────────
+// ── wsl-probe: both mode ──────────────────────────────────────────────────────
 
 test("getWslMode recognizes both mode", () => {
   assert.equal(wsl.getWslMode({ TOKENTRACKER_WSL_MODE: "both" }), "both");
@@ -132,21 +132,6 @@ test("getWslMode recognizes both mode", () => {
 
 test("isInvalidWslMode accepts both mode", () => {
   assert.equal(wsl.isInvalidWslMode({ TOKENTRACKER_WSL_MODE: "both" }), false);
-});
-
-test("getWslPrefer returns null when unset, respects explicit setting", () => {
-  assert.equal(wsl.getWslPrefer({}), null);
-  assert.equal(wsl.getWslPrefer({ TOKENTRACKER_WSL_PREFER: "" }), null);
-  assert.equal(wsl.getWslPrefer({ TOKENTRACKER_WSL_PREFER: "wsl" }), "wsl");
-  assert.equal(wsl.getWslPrefer({ TOKENTRACKER_WSL_PREFER: "native" }), "native");
-  assert.equal(wsl.getWslPrefer({ TOKENTRACKER_WSL_PREFER: "WSL" }), "wsl");
-});
-
-test("getWslPrefer invalid values return null", () => {
-  assert.equal(wsl.getWslPrefer({ TOKENTRACKER_WSL_PREFER: "foo" }), null);
-  assert.equal(wsl.getWslPrefer({ TOKENTRACKER_WSL_PREFER: "both" }), null);
-  assert.equal(wsl.getWslPrefer({ TOKENTRACKER_WSL_PREFER: "wsl-first" }), null);
-  assert.equal(wsl.getWslPrefer({ TOKENTRACKER_WSL_PREFER: "native_first" }), null);
 });
 
 test("pickWin32Path handles both mode", (t) => {

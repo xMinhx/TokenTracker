@@ -68,48 +68,6 @@ test("multiInstallParse dual paths merge when no prefer set (default)", async ()
   assert.equal(bucket.totals.output_tokens, 100, "both installs merged (50+50)");
 });
 
-test("multiInstallParse dual paths with prefer=native resolves conflict", async () => {
-  const cursors = { hourly: { buckets: {} } };
-  const env = { TOKENTRACKER_WSL_PREFER: "native" };
-
-  const r = await multiInstallParse({
-    paths: { native: "/native", wsl: "/wsl" },
-    parserFn: async ({ resolvedPath, cursors: c }) => {
-      addToBucket(c, "hermes|gpt-4|2026-01-01T00:00:00.000Z", 100, 50);
-      return { recordsProcessed: 1, eventsAggregated: 1, bucketsQueued: 1 };
-    },
-    providerName: "hermes",
-    cursors,
-    env,
-    getParams: (path) => ({ resolvedPath: path }),
-  });
-
-  assert.equal(r.recordsProcessed, 2);
-  const bucket = cursors.hourly.buckets["hermes|gpt-4|2026-01-01T00:00:00.000Z"];
-  assert.equal(bucket.totals.input_tokens, 100, "native data kept (WSL discarded)");
-});
-
-test("multiInstallParse dual paths with prefer=wsl resolves conflict", async () => {
-  const cursors = { hourly: { buckets: {} } };
-  const env = { TOKENTRACKER_WSL_PREFER: "wsl" };
-
-  const r = await multiInstallParse({
-    paths: { native: "/native", wsl: "/wsl" },
-    parserFn: async ({ resolvedPath, cursors: c }) => {
-      addToBucket(c, "hermes|gpt-4|2026-01-01T00:00:00.000Z", 100, 50);
-      return { recordsProcessed: 1, eventsAggregated: 1, bucketsQueued: 1 };
-    },
-    providerName: "hermes",
-    cursors,
-    env,
-    getParams: (path) => ({ resolvedPath: path }),
-  });
-
-  assert.equal(r.recordsProcessed, 2);
-  const bucket = cursors.hourly.buckets["hermes|gpt-4|2026-01-01T00:00:00.000Z"];
-  assert.equal(bucket.totals.input_tokens, 100, "WSL data kept (native discarded)");
-});
-
 test("multiInstallParse cursor isolation between installs", async () => {
   const cursors = { hourly: {} };
 
