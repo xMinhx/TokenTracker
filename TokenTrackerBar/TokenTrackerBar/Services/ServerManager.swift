@@ -185,6 +185,7 @@ final class ServerManager: ObservableObject {
         var env = ProcessInfo.processInfo.environment
         env["NODE_ENV"] = "production"
         env["HOME"] = NSHomeDirectory()
+        env["TOKENTRACKER_APP_SHELL"] = "macos"
         process.environment = env
 
         process.terminationHandler = { [weak self] _ in
@@ -213,7 +214,9 @@ final class ServerManager: ObservableObject {
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        process.environment = ProcessInfo.processInfo.environment
+        var fallbackEnv = ProcessInfo.processInfo.environment
+        fallbackEnv["TOKENTRACKER_APP_SHELL"] = "macos"
+        process.environment = fallbackEnv
 
         // Clean up if process dies unexpectedly
         process.terminationHandler = { [weak self] _ in

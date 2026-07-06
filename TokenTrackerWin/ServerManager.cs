@@ -312,6 +312,7 @@ internal sealed class ServerManager : IDisposable
         psi.ArgumentList.Add(entryPath);
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment["NODE_ENV"] = "production";
+        psi.Environment["TOKENTRACKER_APP_SHELL"] = "windows";
 
         Log($"StartTrackerProcess file={nodePath} entry={entryPath} args={string.Join(" ", args)}");
         var proc = Process.Start(psi);

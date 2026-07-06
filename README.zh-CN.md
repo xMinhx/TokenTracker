@@ -236,7 +236,7 @@ flowchart LR
 | **不上传内容** | 只记录 token 数量和时间戳。**绝不**记录 prompt、回复或文件内容 |
 | **默认纯本地** | 所有数据保留在你的机器上。排行榜是完全 opt-in |
 | **可审计** | 代码开源。[`src/lib/rollout.js`](src/lib/rollout.js) 里只有数字和时间戳 |
-| **零埋点** | 无分析、无崩溃上报、无任何 phone-home |
+| **仅匿名心跳** | 为统计活跃安装量，应用每天最多发送一次匿名心跳：机器 ID 的单向哈希、应用版本、操作系统平台、运行形态（cli/mac/win）。绝不包含 token 数量、模型名、prompt 或路径。可在 [`src/lib/telemetry.js`](src/lib/telemetry.js) 审计；设置 `TOKENTRACKER_NO_TELEMETRY=1` 或 `DO_NOT_TRACK=1` 即可关闭 |
 
 ---
 
@@ -247,6 +247,7 @@ flowchart LR
 | 变量 | 说明 | 默认值 |
 |---|---|---|
 | `TOKENTRACKER_DEBUG` | 打开 debug 日志（`1` 表示打开） | — |
+| `TOKENTRACKER_NO_TELEMETRY` | 关闭匿名每日心跳（`1` 表示关闭；同样尊重 `DO_NOT_TRACK` 标准） | — |
 | `TOKENTRACKER_HTTP_TIMEOUT_MS` | HTTP 超时时间（毫秒） | `20000` |
 | `CODEX_HOME` | 覆盖 Codex CLI 目录 | `~/.codex` |
 | `GEMINI_HOME` | 覆盖 Gemini CLI 目录 | `~/.gemini` |

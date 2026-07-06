@@ -85,6 +85,7 @@ const {
   recordUploadSuccess,
   parseRetryAfterMs,
 } = require("../lib/upload-throttle");
+const { maybeSendHeartbeat } = require("../lib/telemetry");
 const {
   isCursorInstalled,
   extractCursorSessionToken,
@@ -1526,6 +1527,13 @@ async function cmdSync(argv) {
           .join("\n"),
       );
     }
+
+    // Anonymous daily heartbeat (shared 24h throttle with serve — see
+    // src/lib/telemetry.js). Awaited because hook-spawned sync processes exit
+    // right after this function returns, which would kill an in-flight
+    // request; the throttle makes it a network no-op on all but the first
+    // sync of the day, and maybeSendHeartbeat never throws.
+    await maybeSendHeartbeat({ trackerDir });
   } finally {
     progress?.stop();
     await lock.release();
