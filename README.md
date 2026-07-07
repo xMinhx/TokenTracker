@@ -243,7 +243,7 @@ flowchart LR
 | **No content upload** | Only token counts and timestamps. Never prompts, responses, or file contents. |
 | **Local-only by default** | All data stays on your machine. The leaderboard is fully opt-in. |
 | **Auditable** | Open source. Read [`src/lib/rollout.js`](src/lib/rollout.js) — only numbers and timestamps. |
-| **Anonymous heartbeat only** | To count active installs, the app sends at most one anonymous ping per day: a one-way hash of the machine id, app version, OS platform, and app shell (cli/mac/win). Never token counts, model names, prompts, or paths. Audit it in [`src/lib/telemetry.js`](src/lib/telemetry.js); opt out with `TOKENTRACKER_NO_TELEMETRY=1` or `DO_NOT_TRACK=1`. |
+| **Anonymous usage stats only** | Two things phone home, both anonymous: (1) at most one daily heartbeat — a one-way hash of the machine id, app version, OS platform, and app shell (cli/mac/win); (2) anonymous dashboard pageview/feature events (PostHog — autocapture and session recording disabled, browser Do-Not-Track respected). Never token counts, model names, prompts, or paths. Audit [`src/lib/telemetry.js`](src/lib/telemetry.js) and [`dashboard/src/lib/analytics.js`](dashboard/src/lib/analytics.js); one switch disables both on your machine: `TOKENTRACKER_NO_TELEMETRY=1` (or `DO_NOT_TRACK=1`). |
 
 ---
 
@@ -254,7 +254,7 @@ Most users never need this — defaults are sensible. For advanced setups:
 | Variable | Description | Default |
 |---|---|---|
 | `TOKENTRACKER_DEBUG` | Enable debug output (`1` to enable) | — |
-| `TOKENTRACKER_NO_TELEMETRY` | Disable the anonymous daily heartbeat (`1` to disable; the `DO_NOT_TRACK` standard is also respected) | — |
+| `TOKENTRACKER_NO_TELEMETRY` | Disable all anonymous telemetry — daily heartbeat and dashboard analytics (`1` to disable; the `DO_NOT_TRACK` standard is also respected) | — |
 | `TOKENTRACKER_HTTP_TIMEOUT_MS` | HTTP timeout in milliseconds | `20000` |
 | `CODEX_HOME` | Override Codex CLI directory | `~/.codex` |
 | `GEMINI_HOME` | Override Gemini CLI directory | `~/.gemini` |

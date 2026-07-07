@@ -234,7 +234,7 @@ flowchart LR
 | **コンテンツをアップロードしない** | トークン数とタイムスタンプのみ。プロンプト、レスポンス、ファイル内容は扱いません。 |
 | **デフォルトでローカル限定** | すべてのデータはマシン上に留まります。リーダーボードは完全にオプトインです。 |
 | **監査可能** | オープンソース。[`src/lib/rollout.js`](src/lib/rollout.js) を読んでください — 数字とタイムスタンプだけです。 |
-| **匿名ハートビートのみ** | アクティブインストール数を把握するため、1 日最大 1 回の匿名 ping を送信します：マシン ID の一方向ハッシュ、アプリバージョン、OS プラットフォーム、実行形態（cli/mac/win）のみ。トークン数、モデル名、プロンプト、パスは一切含まれません。[`src/lib/telemetry.js`](src/lib/telemetry.js) で監査可能。`TOKENTRACKER_NO_TELEMETRY=1` または `DO_NOT_TRACK=1` で無効化できます。 |
+| **匿名利用統計のみ** | 外部送信は匿名の 2 種類だけ：(1) 1 日最大 1 回のハートビート——マシン ID の一方向ハッシュ、アプリバージョン、OS プラットフォーム、実行形態（cli/mac/win）；(2) 匿名のダッシュボードのページ/機能イベント（PostHog——autocapture とセッション録画は無効、ブラウザの Do-Not-Track を尊重）。トークン数、モデル名、プロンプト、パスは一切含まれません。[`src/lib/telemetry.js`](src/lib/telemetry.js) と [`dashboard/src/lib/analytics.js`](dashboard/src/lib/analytics.js) で監査可能。`TOKENTRACKER_NO_TELEMETRY=1` または `DO_NOT_TRACK=1` で両方を無効化できます。 |
 
 ---
 
@@ -245,7 +245,7 @@ flowchart LR
 | 変数 | 説明 | デフォルト |
 |---|---|---|
 | `TOKENTRACKER_DEBUG` | デバッグ出力を有効化（`1` で有効） | — |
-| `TOKENTRACKER_NO_TELEMETRY` | 匿名の日次ハートビートを無効化（`1` で無効。`DO_NOT_TRACK` 標準にも対応） | — |
+| `TOKENTRACKER_NO_TELEMETRY` | すべての匿名テレメトリ（日次ハートビート + ダッシュボード分析）を無効化（`1` で無効。`DO_NOT_TRACK` 標準にも対応） | — |
 | `TOKENTRACKER_HTTP_TIMEOUT_MS` | HTTP タイムアウト（ミリ秒） | `20000` |
 | `CODEX_HOME` | Codex CLI ディレクトリの上書き | `~/.codex` |
 | `GEMINI_HOME` | Gemini CLI ディレクトリの上書き | `~/.gemini` |

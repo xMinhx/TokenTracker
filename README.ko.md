@@ -234,7 +234,7 @@ flowchart LR
 | **콘텐츠 업로드 없음** | 토큰 수치와 타임스탬프만. 프롬프트, 응답, 파일 내용은 절대 다루지 않습니다. |
 | **기본적으로 로컬 전용** | 모든 데이터는 기기에 머뭅니다. 리더보드는 완전히 옵트인. |
 | **감사 가능** | 오픈 소스. [`src/lib/rollout.js`](src/lib/rollout.js)를 읽어보세요 — 숫자와 타임스탬프뿐입니다. |
-| **익명 하트비트만** | 활성 설치 수 집계를 위해 하루 최대 1회 익명 ping을 전송합니다: 머신 ID의 단방향 해시, 앱 버전, OS 플랫폼, 실행 형태(cli/mac/win)만 포함. 토큰 수, 모델명, 프롬프트, 경로는 절대 포함되지 않습니다. [`src/lib/telemetry.js`](src/lib/telemetry.js)에서 감사 가능하며 `TOKENTRACKER_NO_TELEMETRY=1` 또는 `DO_NOT_TRACK=1`로 비활성화할 수 있습니다. |
+| **익명 사용 통계만** | 외부 전송은 익명 2가지뿐: (1) 하루 최대 1회 하트비트——머신 ID의 단방향 해시, 앱 버전, OS 플랫폼, 실행 형태(cli/mac/win); (2) 익명 대시보드 페이지/기능 이벤트(PostHog——autocapture와 세션 녹화 비활성화, 브라우저 Do-Not-Track 존중). 토큰 수, 모델명, 프롬프트, 경로는 절대 포함되지 않습니다. [`src/lib/telemetry.js`](src/lib/telemetry.js)와 [`dashboard/src/lib/analytics.js`](dashboard/src/lib/analytics.js)에서 감사 가능하며 `TOKENTRACKER_NO_TELEMETRY=1` 또는 `DO_NOT_TRACK=1` 하나로 둘 다 비활성화됩니다. |
 
 ---
 
@@ -245,7 +245,7 @@ flowchart LR
 | 변수 | 설명 | 기본값 |
 |---|---|---|
 | `TOKENTRACKER_DEBUG` | 디버그 출력 활성화 (`1`로 활성화) | — |
-| `TOKENTRACKER_NO_TELEMETRY` | 익명 일일 하트비트 비활성화 (`1`로 비활성화, `DO_NOT_TRACK` 표준도 지원) | — |
+| `TOKENTRACKER_NO_TELEMETRY` | 모든 익명 텔레메트리(일일 하트비트 + 대시보드 분석) 비활성화 (`1`로 비활성화, `DO_NOT_TRACK` 표준도 지원) | — |
 | `TOKENTRACKER_HTTP_TIMEOUT_MS` | HTTP 타임아웃 (밀리초) | `20000` |
 | `CODEX_HOME` | Codex CLI 디렉토리 오버라이드 | `~/.codex` |
 | `GEMINI_HOME` | Gemini CLI 디렉토리 오버라이드 | `~/.gemini` |
