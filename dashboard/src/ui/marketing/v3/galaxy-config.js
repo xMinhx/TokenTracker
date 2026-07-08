@@ -229,6 +229,21 @@ export const GALAXY_VERTEX = /* glsl */ `
       alpha = 0.22 * tw * uIntro;
     }
 
+    // --- GRAVITATIONAL LENSING WARP (3D BLACK HOLE) ---
+    float r_local = length(p.xy);
+    if (r_local > 0.01) {
+      float R_horizon = 0.7;
+      // Fade out particles that fall below the event horizon
+      float horizonFade = smoothstep(0.4, R_horizon, r_local);
+      alpha *= horizonFade;
+      
+      // Deflect particles around the event horizon
+      if (r_local < R_horizon * 4.0) {
+        float deflection = 0.38 * R_horizon * R_horizon / (r_local - R_horizon * 0.7);
+        p.xy += normalize(p.xy) * deflection;
+      }
+    }
+
     // --- COSMIC BIG BANG EXPLOSION ---
     // Calculate 3D explosion direction based on the local position p
     // Adding some random spread on Z direction so it expands as a 3D dome/ellipsoid.

@@ -209,6 +209,7 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
       const hView = window.innerHeight || 1;
       if (h > hView) {
         camera.projectionMatrix.elements[9] = - (h - hView) / h;
+        camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
       }
     }
     let rafResize = 0;
@@ -287,6 +288,14 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
       camera.position.y = DISC.cameraY - pointerSmooth.y * 1.2 - progress * 4.5;
       camera.position.z =
         DISC.cameraZ + (1 - introEase) * DISC.cameraDollyIn - progress * DISC.cameraPushIn;
+      // Keep galaxy visual center aligned to 68vh of the viewport dynamically
+      const hView = window.innerHeight || 1;
+      const v_camera = new THREE.Vector3(0, DISC.yOffset, 0);
+      v_camera.applyMatrix4(camera.matrixWorldInverse);
+      const targetY_ndc = 1 - 2 * (0.68 * hView / lastH);
+      camera.projectionMatrix.elements[9] = (camera.projectionMatrix.elements[5] * v_camera.y) / (-v_camera.z) - targetY_ndc;
+      camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+
       camera.lookAt(0, 0, 0);
 
       renderer.render(scene, camera);
@@ -367,10 +376,10 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
       {/* Core convergence glow (both modes; the particles amplify it in full mode). */}
       <div
         ref={glowRef}
-        className="absolute left-1/2 top-[68vh] h-[34rem] w-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-40"
+        className="absolute left-1/2 top-[68vh] h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-45"
         style={{
           background:
-            "radial-gradient(closest-side, var(--lv3-accent-faint), var(--lv3-accent-ghost) 45%, transparent 72%)",
+            "radial-gradient(circle, var(--lv3-bg) 6%, rgba(138, 122, 255, 0.28) 18%, rgba(138, 122, 255, 0.05) 45%, transparent 68%)",
         }}
       />
       {isStatic ? (
