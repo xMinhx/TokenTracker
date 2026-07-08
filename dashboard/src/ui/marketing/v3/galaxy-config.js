@@ -267,29 +267,26 @@ export const GALAXY_VERTEX = /* glsl */ `
 
     // --- Gravitational Lensing & Horizon Void (The 3D Black Hole) ---
     float R_horizon = 0.5; // Event horizon (the dark core)
-    float R_photon = 0.9;  // Accretion ring (where light gets trapped and glows)
+    float R_photon = 1.0;  // Accretion ring (where light gets trapped and glows)
     float r2d = max(0.001, length(p.xz));
     
-    if (r2d < 6.0) {
+    if (r2d < 5.0) {
       // 1. Relativistic Frame Dragging (The violent swirl near the core)
-      float swirlFactor = smoothstep(6.0, 0.0, r2d);
-      float frameDrag = pow(swirlFactor, 2.5) * 25.0; // Extreme spin
+      float swirlFactor = smoothstep(5.0, 0.0, r2d);
+      float frameDrag = pow(swirlFactor, 2.0) * 12.0; // Fast spin
       float sDrag = sin(frameDrag);
       float cDrag = cos(frameDrag);
       p.xz = vec2(p.x * cDrag - p.z * sDrag, p.x * sDrag + p.z * cDrag);
       
-      // 2. Gravitational Lensing (Photon Ring Bulge)
-      // Light is bent up and around the black hole. We compress particles into R_photon.
-      float lensWarp = exp(-pow(r2d - R_photon, 2.0) * 3.0); 
+      // 2. Accretion Disk Compression
+      // Particles bunch up into a bright, dense ring right at R_photon
+      float ringPull = exp(-pow(r2d - R_photon, 2.0) * 5.0); 
       
-      // Push particles outwards to compress them into the bright ring
-      p.xz += (p.xz / r2d) * lensWarp * 0.7;
-      
-      // The Y bulge gives it that 3D "Interstellar" bent-light look
-      p.y += lensWarp * (0.8 + sin(aSeed * 6.28) * 1.5); 
+      // Push particles slightly outward to form a sharp ring edge
+      p.xz += (p.xz / r2d) * ringPull * 0.5;
       
       // 3. Superheating (Accretion Glow)
-      glow += lensWarp * 2.0; 
+      glow += ringPull * 2.0; 
     }
     
     // Completely fade out particles that cross the horizon
