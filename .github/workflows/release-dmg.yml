@@ -21,7 +21,7 @@ jobs:
   # PREVIOUS complete version until the publish job flips this one live, once
   # every asset is attached. Cheap (~10s on ubuntu).
   create-release:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
@@ -48,7 +48,7 @@ jobs:
     # and hero number disappeared in shipped DMGs even though the same
     # source rendered fine locally. Pinning to macos-26 keeps the SDK in
     # sync with local builds.
-    runs-on: blacksmith-6vcpu-macos-26
+    runs-on: macos-26
     permissions:
       contents: write
     steps:
@@ -248,7 +248,7 @@ jobs:
   # where the tap saw vX.Y.Z before the DMG asset existed.
   publish:
     needs: [build, windows]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:

@@ -14,7 +14,7 @@ jobs:
   # 22.18+) and loads undici 8 (needs webidl.markAsUncloneable) — neither works
   # on Node 20. The published package itself is built/published on Node 20 below.
   test:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
@@ -46,7 +46,7 @@ jobs:
 
   publish:
     needs: test
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
