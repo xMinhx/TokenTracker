@@ -88,6 +88,98 @@ test("resolveInstallPaths non-both modes return single path with correct selecti
   }
 });
 
+// ── Provider path resolution (PR #261) ────────────────────────────────────────
+
+test("kilo-cli native path defaults to XDG on Linux, APPDATA on Windows", (t) => {
+  mockPlatform(t, "linux");
+  const home = "/home/user";
+  const r = resolveInstallPaths(
+    { nativeValue: path.join(home, ".local", "share", "kilo", "kilo.db") },
+    {},
+    {},
+  );
+  assert.equal(r.native, path.join(home, ".local", "share", "kilo", "kilo.db"));
+  assert.equal(r.wsl, null);
+});
+
+test("kilo-cli WSL path resolves on Windows both mode", (t) => {
+  mockPlatform(t, "win32");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ir-kilo-wsl-"));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const nativeDir = path.join(tmpDir, "native");
+  const wslDir = path.join(tmpDir, "wsl");
+  fs.mkdirSync(nativeDir, { recursive: true });
+  fs.mkdirSync(wslDir, { recursive: true });
+
+  const r = resolveInstallPaths(
+    { nativeValue: nativeDir, wslValue: wslDir },
+    { TOKENTRACKER_WSL_MODE: "both" },
+    { runWsl: () => "Ubuntu\n", existsSync: () => true },
+  );
+  assert.equal(r.native, nativeDir);
+  assert.equal(r.wsl, wslDir);
+});
+
+test("mimo native path defaults to XDG on Linux, APPDATA on Windows", (t) => {
+  mockPlatform(t, "linux");
+  const home = "/home/user";
+  const r = resolveInstallPaths(
+    { nativeValue: path.join(home, ".local", "share", "mimocode", "mimocode.db") },
+    {},
+    {},
+  );
+  assert.equal(r.native, path.join(home, ".local", "share", "mimocode", "mimocode.db"));
+  assert.equal(r.wsl, null);
+});
+
+test("mimo WSL path resolves on Windows both mode", (t) => {
+  mockPlatform(t, "win32");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ir-mimo-wsl-"));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const nativeDir = path.join(tmpDir, "native");
+  const wslDir = path.join(tmpDir, "wsl");
+  fs.mkdirSync(nativeDir, { recursive: true });
+  fs.mkdirSync(wslDir, { recursive: true });
+
+  const r = resolveInstallPaths(
+    { nativeValue: nativeDir, wslValue: wslDir },
+    { TOKENTRACKER_WSL_MODE: "both" },
+    { runWsl: () => "Ubuntu\n", existsSync: () => true },
+  );
+  assert.equal(r.native, nativeDir);
+  assert.equal(r.wsl, wslDir);
+});
+
+test("zcode native path defaults to HOME on Linux, APPDATA on Windows", (t) => {
+  mockPlatform(t, "linux");
+  const home = "/home/user";
+  const r = resolveInstallPaths(
+    { nativeValue: path.join(home, ".zcode", "cli", "db", "db.sqlite") },
+    {},
+    {},
+  );
+  assert.equal(r.native, path.join(home, ".zcode", "cli", "db", "db.sqlite"));
+  assert.equal(r.wsl, null);
+});
+
+test("zcode WSL path resolves on Windows both mode", (t) => {
+  mockPlatform(t, "win32");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ir-zcode-wsl-"));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const nativeDir = path.join(tmpDir, "native");
+  const wslDir = path.join(tmpDir, "wsl");
+  fs.mkdirSync(nativeDir, { recursive: true });
+  fs.mkdirSync(wslDir, { recursive: true });
+
+  const r = resolveInstallPaths(
+    { nativeValue: nativeDir, wslValue: wslDir },
+    { TOKENTRACKER_WSL_MODE: "both" },
+    { runWsl: () => "Ubuntu\n", existsSync: () => true },
+  );
+  assert.equal(r.native, nativeDir);
+  assert.equal(r.wsl, wslDir);
+});
+
 // ── ensureNamespacedCursors ───────────────────────────────────────────────────
 
 test("ensureNamespacedCursors transparent for already-namespaced cursors", () => {
