@@ -641,6 +641,8 @@ async function cmdSync(argv) {
     }
 
     // ── Mimo (mimocode — OpenCode-fork SQLite) ──
+    // readMimoDbMessages filters out mirrored Claude Code rows to avoid
+    // double-counting usage already counted as source=claude.
     let mimoResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (sourceAllowed("mimo")) {
       const mimoNativeValue = process.platform === "win32" && typeof process.env.APPDATA === "string"
