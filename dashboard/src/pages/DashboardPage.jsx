@@ -421,7 +421,7 @@ export function DashboardPage({
   const to = range.to;
 
   const [selectedDevice, setSelectedDevice] = useState(null);
-  const { devices: accountDevices, refresh: refreshAccountDevices } = useAccountDevices({
+  const { devices: accountDevices, accountSources: accountDeviceSources, refresh: refreshAccountDevices } = useAccountDevices({
     from,
     to,
     timeZone,
@@ -430,34 +430,48 @@ export function DashboardPage({
     accountAccessToken,
     accountRevision,
   });
-  // Device filter is meaningful only across 2+ devices in account view.
-  const showDeviceFilter = accountView && accountDevices.length >= 2;
-  // Reset the filter when leaving account view, or when the selected device
-  // disappears (revoked / not in the latest list).
+  // Only devices with usage in the selected range are shown anywhere — a
+  // zero-usage registration (typically a stale fingerprint-drift duplicate) is
+  // noise in both the filter dropdown and the breakdown card.
+  const activeDevices = useMemo(
+    () => accountDevices.filter((d) => (Number(d.total_tokens) || 0) > 0),
+    [accountDevices],
+  );
+  const accountSourceRows = useMemo(
+    () => accountDeviceSources.filter((s) => (Number(s.total_tokens) || 0) > 0),
+    [accountDeviceSources],
+  );
+  // Dropdown filter: choosing between devices needs 2+ of them.
+  const showDeviceFilter = accountView && activeDevices.length >= 2;
+  // Breakdown card: needs 2+ rows; account-level sources count as rows.
+  const showDeviceCard = accountView && activeDevices.length + accountSourceRows.length >= 2;
+  // Reset the filter when no selector is visible, or when the selected device
+  // disappears (revoked / idle in the new range / not in the latest list).
   useEffect(() => {
-    if (!showDeviceFilter) {
+    if (!showDeviceFilter && !showDeviceCard) {
       if (selectedDevice !== null) setSelectedDevice(null);
       return;
     }
-    if (selectedDevice && !accountDevices.some((d) => d.id === selectedDevice)) {
+    if (selectedDevice && !activeDevices.some((d) => d.id === selectedDevice)) {
       setSelectedDevice(null);
     }
-  }, [showDeviceFilter, accountDevices, selectedDevice]);
+  }, [showDeviceFilter, showDeviceCard, activeDevices, selectedDevice]);
 
   const deviceOptions = useMemo(() => {
     if (!showDeviceFilter) return [];
     return [
       { value: "", label: copy("dashboard.device_filter.all") },
-      ...accountDevices.map((d) => ({
+      ...activeDevices.map((d) => ({
         value: d.id,
         label: formatDeviceLabel(d) || copy("dashboard.device_card.unnamed"),
       })),
     ];
-  }, [showDeviceFilter, accountDevices, resolvedLocale]);
+  }, [showDeviceFilter, activeDevices, resolvedLocale]);
 
-  const deviceUsageBlock = showDeviceFilter ? (
+  const deviceUsageBlock = showDeviceCard ? (
     <DeviceUsageCard
-      devices={accountDevices}
+      devices={activeDevices}
+      accountSources={accountSourceRows}
       selectedDeviceId={selectedDevice || ""}
       onSelectDevice={(id) => setSelectedDevice(id || null)}
       onRenameDevice={async (id, name) => {

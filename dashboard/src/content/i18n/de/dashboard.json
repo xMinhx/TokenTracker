@@ -330,6 +330,8 @@
   "usage.overview.cache_hit_rate_detail": "{{reused}} wiederverwendet / {{input}} Input",
   "usage.overview.cache_hit_rate_label": "Cache-Trefferquote",
   "dashboard.device_card.empty": "Keine aktiven Geräte gefunden",
+  "dashboard.device_card.account_scope": "Kontoweit",
+  "dashboard.device_card.account_scope_tip": "Über die Konto-API des Anbieters synchronisiert — keinem einzelnen Gerät zugeordnet",
   "dashboard.device_card.rename_aria": "Gerät umbenennen",
   "dashboard.device_card.rename_cancel": "Abbrechen",
   "dashboard.device_card.rename_error": "Umbenennung fehlgeschlagen – dieser Name wird möglicherweise bereits verwendet.",

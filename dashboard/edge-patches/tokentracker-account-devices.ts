@@ -70,8 +70,18 @@ interface DeviceRow {
 }
 
 interface GroupedRow {
+  bucket: string | null;
+  source: string | null;
   total_tokens: number | null;
 }
+
+// Keep in sync with ACCOUNT_LEVEL_SOURCES in src/lib/source-metadata.js (parity
+// asserted by test/account-source-parity.test.js). Account-level sources come
+// from a per-ACCOUNT cloud API with no device attribution — the RPC's account
+// branch intentionally ignores p_device_ids, so a per-device query would add
+// the user's ENTIRE account-level total to EVERY device (the "N identical
+// devices" skew). A device breakdown must therefore exclude them.
+const ACCOUNT_LEVEL_SOURCES = new Set<string>(["cursor"]);
 
 async function sumDeviceTokens(
   client: ReturnType<typeof createClient>,
@@ -79,6 +89,8 @@ async function sumDeviceTokens(
   deviceId: string,
   fromIso: string,
   toIso: string,
+  fromDay: string,
+  toDay: string,
   tz: string | null,
   tzOffsetMinutes: number | null,
 ): Promise<number> {
@@ -97,8 +109,59 @@ async function sumDeviceTokens(
   }
   const rows = (Array.isArray(data) ? data : []) as GroupedRow[];
   let sum = 0;
-  for (const r of rows) sum += Number(r.total_tokens) || 0;
+  for (const r of rows) {
+    // The UTC query window is widened ±1 day for TZ shifts; the RPC buckets to
+    // tz-local days, so trim back to the requested [from, to] here (mirrors
+    // account-summary's `daily.filter(d.day >= from && d.day <= to)`).
+    const day = String(r.bucket || "");
+    if (day < fromDay || day > toDay) continue;
+    if (ACCOUNT_LEVEL_SOURCES.has(String(r.source || ""))) continue;
+    sum += Number(r.total_tokens) || 0;
+  }
   return sum;
+}
+
+// Account-level sources excluded from the per-device sums above still belong in
+// the breakdown (otherwise the card total is short of the dashboard total by
+// exactly their share). An empty p_device_ids returns ONLY the RPC's account
+// branch (the machine branch matches no device), giving each source's deduped
+// account-wide total in one call.
+async function sumAccountSources(
+  client: ReturnType<typeof createClient>,
+  userId: string,
+  fromIso: string,
+  toIso: string,
+  fromDay: string,
+  toDay: string,
+  tz: string | null,
+  tzOffsetMinutes: number | null,
+): Promise<Array<{ source: string; total_tokens: number }>> {
+  const { data, error } = await client.database.rpc("account_usage_grouped", {
+    p_user_id: userId,
+    p_device_ids: [],
+    p_from: fromIso,
+    p_to: toIso,
+    p_trunc: "day",
+    p_tz: tz,
+    p_offset_min: tzOffsetMinutes,
+  });
+  if (error) {
+    console.error(`account-devices: account-source sum failed: ${error.message}`);
+    return [];
+  }
+  const rows = (Array.isArray(data) ? data : []) as GroupedRow[];
+  const bySource = new Map<string, number>();
+  for (const r of rows) {
+    const day = String(r.bucket || "");
+    if (day < fromDay || day > toDay) continue;
+    const source = String(r.source || "");
+    if (!ACCOUNT_LEVEL_SOURCES.has(source)) continue;
+    bySource.set(source, (bySource.get(source) || 0) + (Number(r.total_tokens) || 0));
+  }
+  return [...bySource.entries()]
+    .map(([source, total_tokens]) => ({ source, total_tokens }))
+    .filter((s) => s.total_tokens > 0)
+    .sort((a, b) => b.total_tokens - a.total_tokens);
 }
 
 export default async function (req: Request): Promise<Response> {
@@ -147,8 +210,9 @@ export default async function (req: Request): Promise<Response> {
   }
 
   // Widen the UTC window ±1 day so TZ-shifted edge hours are captured (mirrors
-  // account-summary). The RPC handles per-device isolation + source-class
-  // dedup; a single-device query needs no extra dedup.
+  // account-summary); sumDeviceTokens trims the tz-local day buckets back to
+  // [from, to]. The RPC handles per-device isolation + source-class dedup for
+  // machine-level sources; account-level sources are excluded there entirely.
   const startDate = new Date(`${from}T00:00:00Z`);
   startDate.setUTCDate(startDate.getUTCDate() - 1);
   const endDate = new Date(`${to}T00:00:00Z`);
@@ -159,17 +223,21 @@ export default async function (req: Request): Promise<Response> {
   // Per-device RPC errors are already degraded to 0 inside sumDeviceTokens;
   // this catch is a last-resort guard for unexpected (synchronous) failures.
   let withTotals: Array<DeviceRow & { total_tokens: number }>;
+  let accountSources: Array<{ source: string; total_tokens: number }>;
   try {
-    withTotals = await Promise.all(
-      devices.map(async (d) => ({
-        ...d,
-        total_tokens: await sumDeviceTokens(client, userId, d.id, rangeStart, rangeEnd, tz, tzOffsetMinutes),
-      })),
-    );
+    [withTotals, accountSources] = await Promise.all([
+      Promise.all(
+        devices.map(async (d) => ({
+          ...d,
+          total_tokens: await sumDeviceTokens(client, userId, d.id, rangeStart, rangeEnd, from, to, tz, tzOffsetMinutes),
+        })),
+      ),
+      sumAccountSources(client, userId, rangeStart, rangeEnd, from, to, tz, tzOffsetMinutes),
+    ]);
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }
 
   withTotals.sort((a, b) => b.total_tokens - a.total_tokens);
-  return json({ from, to, devices: withTotals });
+  return json({ from, to, devices: withTotals, account_sources: accountSources });
 }

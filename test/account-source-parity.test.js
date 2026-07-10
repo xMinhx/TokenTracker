@@ -7,6 +7,7 @@
 //   - scripts/ops/account-usage-grouped-rpc.sql (account view RPC)
 //   - scripts/ops/leaderboard-usage-grouped-rpc.sql (leaderboard RPC)
 //   - dashboard/edge-patches/tokentracker-leaderboard-profile.ts (profile edge)
+//   - dashboard/edge-patches/tokentracker-account-devices.ts (device breakdown edge)
 // A drift (e.g. adding a new account-level source to source-metadata.js but
 // forgetting the SQL) silently re-introduces the cross-device double-count bug
 // that v0.44 fixed. This test fails loudly on any mismatch.
@@ -64,6 +65,10 @@ test("account-level source list is identical across source-metadata, both RPCs, 
     ),
     "tokentracker-leaderboard-profile.ts": extractJsSet(
       readFile("dashboard/edge-patches/tokentracker-leaderboard-profile.ts"),
+      "ACCOUNT_LEVEL_SOURCES",
+    ),
+    "tokentracker-account-devices.ts": extractJsSet(
+      readFile("dashboard/edge-patches/tokentracker-account-devices.ts"),
       "ACCOUNT_LEVEL_SOURCES",
     ),
   };

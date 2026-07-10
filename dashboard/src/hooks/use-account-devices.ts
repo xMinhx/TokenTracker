@@ -18,12 +18,17 @@ export function useAccountDevices({
 }: any = {}) {
   const enabled = Boolean(accountView && accountAccessToken);
   const [devices, setDevices] = useState<any[]>([]);
+  // Account-level sources (e.g. Cursor) have no device attribution; the edge
+  // returns their account-wide totals separately so the card can still show
+  // them (otherwise its total is short of the dashboard total by their share).
+  const [accountSources, setAccountSources] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!enabled) {
       setDevices([]);
+      setAccountSources([]);
       setLoading(false);
       setError(null);
       return;
@@ -34,9 +39,11 @@ export function useAccountDevices({
       const token = await resolveAuthAccessToken(accountAccessToken);
       const res = await fetchAccountDevices({ from, to, timeZone, tzOffsetMinutes, accessToken: token });
       setDevices(Array.isArray(res?.devices) ? res.devices : []);
+      setAccountSources(Array.isArray(res?.account_sources) ? res.account_sources : []);
     } catch (e: any) {
       setError(e?.message || String(e));
       setDevices([]);
+      setAccountSources([]);
     } finally {
       setLoading(false);
     }
@@ -46,5 +53,5 @@ export function useAccountDevices({
     refresh();
   }, [refresh]);
 
-  return { devices, loading, error, refresh };
+  return { devices, accountSources, loading, error, refresh };
 }

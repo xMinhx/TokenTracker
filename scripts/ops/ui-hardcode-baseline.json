@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-08T11:01:00.028Z",
+  "generatedAt": "2026-07-10T11:38:59.237Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 287,
-    "rawText": 164
+    "rawText": 165
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -263,10 +263,11 @@
     },
     "dashboard/src/ui/dashboard/components/DeviceUsageCard.jsx": {
       "colors": 0,
-      "rawText": 5,
+      "rawText": 6,
       "rawTextTokens": [
         ") : ( /* Display state: the whole row toggles the filter; rename is a sibling overlay (a button must not nest inside a button — invalid DOM). */",
         "0 ? ((tokens / total) * 100).toFixed(1) : \"0.0\"; const isSelected = selectedDeviceId === d.id; const name = formatDeviceLabel(d) || copy(\"dashboard.device_card.unnamed\"); const isEditing = editingId === d.id; const fillClass = isSelected ? \"bg-oai-brand\" : anySelected ? \"bg-oai-gray-300 dark:bg-oai-gray-600\" : \"bg-oai-brand/50\"; // While filtering, fade unselected rows so the active device stands out. const itemOpacity = anySelected && !isSelected ? \"opacity-40 hover:opacity-80\" : \"opacity-100\"; return (",
+        "0 ? ((tokens / total) * 100).toFixed(1) : \"0.0\"; const rowOpacity = anySelected ? \"opacity-40\" : \"opacity-100\"; return (",
         "; if (p.includes(\"linux\")) return",
         "; if (p.includes(\"win\")) return",
         "; return"

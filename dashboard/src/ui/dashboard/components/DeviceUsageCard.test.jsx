@@ -76,4 +76,37 @@ describe("DeviceUsageCard", () => {
     expect(await screen.findByText(/Couldn't rename/i)).toBeTruthy();
     expect(screen.getByPlaceholderText("Device name")).toBeTruthy();
   });
+
+  it("hides devices with zero usage in the selected range", () => {
+    render(
+      <DeviceUsageCard
+        devices={[...devices, { id: "d3", device_name: "Ghost Mac", platform: "darwin", total_tokens: 0 }]}
+        selectedDeviceId=""
+        onSelectDevice={() => {}}
+      />,
+    );
+    expect(screen.queryByText("Ghost Mac")).toBeNull();
+    expect(screen.getByText("MacBook Pro")).toBeTruthy();
+  });
+
+  it("lists account-level sources as non-clickable rows inside the shared denominator", async () => {
+    const onSelectDevice = vi.fn();
+    const { container } = render(
+      <DeviceUsageCard
+        devices={devices}
+        accountSources={[{ source: "cursor", total_tokens: 1000 }]}
+        selectedDeviceId=""
+        onSelectDevice={onSelectDevice}
+      />,
+    );
+    const row = screen.getByText("Cursor");
+    // Denominator = 600 + 400 devices + 1000 account = 2000 -> 30% / 20% / 50%.
+    const text = container.textContent || "";
+    expect(text).toContain("30.0%");
+    expect(text).toContain("20.0%");
+    expect(text).toContain("50.0%");
+    // Account-level usage has no device to filter by — clicking must not select.
+    await userEvent.click(row);
+    expect(onSelectDevice).not.toHaveBeenCalled();
+  });
 });

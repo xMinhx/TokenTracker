@@ -4,6 +4,13 @@ import { Card } from "../../components";
 import { copy } from "../../../lib/copy";
 import { formatCompactNumber } from "../../../lib/format";
 import { formatDeviceLabel } from "../../../lib/device-label";
+import { ProviderIcon } from "./ProviderIcon";
+
+// "cursor" -> "Cursor" (account-level source rows carry a raw source key).
+function formatSourceLabel(source) {
+  const s = String(source || "");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 const DOT_DIVIDER = " · ";
 const PCT_SIGN = "%";
@@ -18,7 +25,7 @@ function PlatformIcon({ platform, className }) {
   return <MonitorSmartphone className={className} aria-hidden />;
 }
 
-export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectDevice, onRenameDevice }) {
+export function DeviceUsageCard({ devices = [], accountSources = [], selectedDeviceId = "", onSelectDevice, onRenameDevice }) {
   const [editingId, setEditingId] = useState("");
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
@@ -28,10 +35,20 @@ export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectD
   const canSelect = typeof onSelectDevice === "function";
   const anySelected = Boolean(selectedDeviceId);
 
-  // Rank heaviest-first so the dominant device leads the breakdown.
-  const total = devices.reduce((sum, d) => sum + (Number(d.total_tokens) || 0), 0);
+  // Denominator spans devices AND account-level sources so the card total
+  // matches the dashboard total (account-level usage has no device attribution
+  // and is listed as its own row rather than folded into a device).
+  const total =
+    devices.reduce((sum, d) => sum + (Number(d.total_tokens) || 0), 0) +
+    accountSources.reduce((sum, s) => sum + (Number(s.total_tokens) || 0), 0);
+  // Rank heaviest-first so the dominant device leads the breakdown. Devices
+  // idle in the selected range (0 tokens — typically stale duplicate
+  // registrations) are noise, not distribution — hide them.
   const ranked = useMemo(
-    () => [...devices].sort((a, b) => (Number(b.total_tokens) || 0) - (Number(a.total_tokens) || 0)),
+    () =>
+      devices
+        .filter((d) => (Number(d.total_tokens) || 0) > 0)
+        .sort((a, b) => (Number(b.total_tokens) || 0) - (Number(a.total_tokens) || 0)),
     [devices],
   );
 
@@ -66,8 +83,10 @@ export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectD
     }
   }
 
+  const accountRows = accountSources.filter((s) => (Number(s.total_tokens) || 0) > 0);
+
   // Empty state (defensive: today the card is only mounted with >= 2 devices).
-  if (devices.length === 0) {
+  if (ranked.length === 0 && accountRows.length === 0) {
     return (
       <Card bodyClassName="!px-3 !py-3.5">
         <div className="flex items-center justify-between gap-2 mb-2 px-2">
@@ -242,6 +261,55 @@ export function DeviceUsageCard({ devices = [], selectedDeviceId = "", onSelectD
                   {copy("dashboard.device_card.rename_error")}
                 </div>
               )}
+            </div>
+          );
+        })}
+
+        {/* Account-level sources (e.g. Cursor) — usage synced from the
+            provider's per-account API, so it belongs to the whole account, not
+            any one device. Listed as their own rows (after devices, not
+            interleaved: a different attribution class) so the card total
+            matches the dashboard total; not clickable — there is no device to
+            filter by. */}
+        {accountRows.map((s) => {
+          const tokens = Number(s.total_tokens) || 0;
+          const percent = total > 0 ? ((tokens / total) * 100).toFixed(1) : "0.0";
+          const rowOpacity = anySelected ? "opacity-40" : "opacity-100";
+          return (
+            <div
+              key={`account-${s.source}`}
+              className={`rounded-md px-2 py-1.5 transition-all duration-200 ${rowOpacity}`}
+              title={copy("dashboard.device_card.account_scope_tip")}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span className="h-3.5 w-3.5 shrink-0 flex items-center justify-center">
+                    <ProviderIcon provider={s.source} size={14} />
+                  </span>
+                  <span className="block truncate text-[13px] font-medium text-oai-black dark:text-oai-white">
+                    {formatSourceLabel(s.source)}
+                  </span>
+                  <span className="shrink-0 text-[10px] uppercase tracking-wide text-oai-gray-400 dark:text-oai-gray-500">
+                    {copy("dashboard.device_card.account_scope")}
+                  </span>
+                </div>
+                <span className="shrink-0 text-[13px] font-semibold tabular-nums text-oai-black dark:text-oai-white">
+                  {formatCompactNumber(tokens)}
+                  <span className="text-oai-gray-400 dark:text-oai-gray-500 font-normal">
+                    {DOT_DIVIDER}
+                    {percent}
+                    {PCT_SIGN}
+                  </span>
+                </span>
+              </div>
+              <div className="mt-1.5 h-[2px] bg-oai-gray-100 dark:bg-oai-gray-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-[width,background-color] duration-700 ease-out ${
+                    anySelected ? "bg-oai-gray-300 dark:bg-oai-gray-600" : "bg-oai-brand/50"
+                  }`}
+                  style={{ width: `${percent}%` }}
+                />
+              </div>
             </div>
           );
         })}

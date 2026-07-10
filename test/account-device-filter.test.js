@@ -66,6 +66,40 @@ test("account-devices endpoint exists, verifies JWT, queries devices, sums per-d
   assert.ok(src.includes("total_tokens"), "does not return per-device total_tokens");
 });
 
+// Two per-device summing invariants (both regressed in the shipped v0.61.0 card):
+//   1. The UTC query window is widened ±1 day for TZ shifts, so the tz-local day
+//      buckets the RPC returns MUST be trimmed back to [from, to] — otherwise a
+//      single-day view sums ~3 days per device.
+//   2. The RPC's account-level branch ignores p_device_ids, so account-level
+//      sources (cursor) MUST be excluded from per-device sums — otherwise every
+//      device gets the user's entire account-level total added (N identical
+//      phantom-device rows).
+test("account-devices trims day buckets to [from, to] and excludes account-level sources", () => {
+  const src = readEdge("tokentracker-account-devices.ts");
+  assert.ok(
+    /day\s*<\s*fromDay\s*\|\|\s*day\s*>\s*toDay/.test(src),
+    "per-device sum must skip buckets outside the requested [from, to] day range",
+  );
+  assert.ok(
+    /ACCOUNT_LEVEL_SOURCES\.has\(/.test(src),
+    "per-device sum must skip account-level sources (no device attribution)",
+  );
+});
+
+// The account-level usage excluded from per-device sums must still be returned
+// (as account_sources) so the card total reconciles with the dashboard total.
+test("account-devices returns account-level source totals alongside devices", () => {
+  const src = readEdge("tokentracker-account-devices.ts");
+  assert.ok(
+    /p_device_ids:\s*\[\]/.test(src),
+    "account-source sum must call the RPC with an empty p_device_ids (account branch only)",
+  );
+  assert.ok(
+    src.includes("account_sources: accountSources"),
+    "response must include the account_sources array",
+  );
+});
+
 test("account-devices is NOT in the pricing-parity mirror set (no MODEL_PRICING block)", () => {
   const src = readEdge("tokentracker-account-devices.ts");
   assert.ok(!src.includes("const MODEL_PRICING"), "account-devices must not embed a pricing block");
