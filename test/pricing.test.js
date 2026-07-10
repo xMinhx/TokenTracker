@@ -124,6 +124,30 @@ test("matcher: lookupPricing handles CURATED fuzzy substring (kiro-future-xyz â†
   assert.equal(r.source, "curated:fuzzy");
 });
 
+test("matcher: GPT-5.6 codex tiers resolve to their real curated rates (not the gpt-5 fallback)", () => {
+  const curated = require("../src/lib/pricing/curated-overrides.json");
+  // LiteLLM has no gpt-5.6 yet; simulate that so curated must win.
+  const litellm = { "gpt-5": { input: 1.25, output: 10, cache_read: 0.125 } };
+  const cases = [
+    ["gpt-5.6-sol", 5, 30, "curated:exact"],
+    ["gpt-5.6-terra", 2.5, 15, "curated:exact"],
+    ["gpt-5.6-luna", 1, 6, "curated:exact"],
+    // reasoning-effort variants codex appends must still land on the right tier
+    ["gpt-5.6-sol-high", 5, 30, null],
+    ["gpt-5.6-solhigh", 5, 30, "curated:fuzzy"],
+    ["gpt-5.6-terrahigh", 2.5, 15, "curated:fuzzy"],
+    // bare / unknown-tier falls back to the balanced terra tier, never gpt-5
+    ["gpt-5.6", 2.5, 15, "curated:fuzzy"],
+  ];
+  for (const [model, input, output, source] of cases) {
+    const r = matcher.lookupPricing(model, { curated, litellm, source: "codex" });
+    assert.equal(r.hit, true, `${model} should resolve`);
+    assert.equal(r.value.input, input, `${model} input`);
+    assert.equal(r.value.output, output, `${model} output`);
+    if (source) assert.equal(r.source, source, `${model} source`);
+  }
+});
+
 test("matcher: lookupPricing fuzzy match restores `digit-digit` to `digit.digit` (droid GLM parity)", () => {
   // Droid dash-normalizes upstream `GLM-5.1` to `glm-5-1`, but curated keys
   // are dot-delimited. The matcher must retry a dot-restored variant of the

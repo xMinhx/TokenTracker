@@ -8,6 +8,9 @@
     "claude-fable-5":   { "input": 10,   "output": 50,   "cache_read": 1,     "cache_write": 12.5, "note": "Fable 5 — Anthropic's top tier above Opus. Not yet in LiteLLM. $10/$50 per MTok; cache_read 0.1x, cache_write 1.25x. Remove once LiteLLM carries it." },
     "claude-opus-4-8":  { "input": 5,    "output": 25,   "cache_read": 0.5,   "cache_write": 6.25, "note": "Opus 4.8 not yet in LiteLLM. Pin to the standard Opus tier (same as 4.6/4.7); remove once LiteLLM carries it." },
     "claude-sonnet-5":  { "input": 3,    "output": 15,   "cache_read": 0.3,   "cache_write": 3.75, "note": "Sonnet 5. LiteLLM added this model on ~2026-06-30 with matching rates, but pin explicitly so pricing is correct immediately rather than depending on the 24h local pricing-cache refresh cycle." },
+    "gpt-5.6-sol":      { "input": 5,    "output": 30,   "cache_read": 0.5,   "cache_write": 6.25,  "note": "GPT-5.6 family (public 2026-07-09). Flagship tier. Not yet in LiteLLM. developers.openai.com/api/docs/pricing: $5/$30 per MTok, cached input 0.1x, cache write 1.25x. Codex emits gpt-5.6-sol (+ reasoning-effort variants like gpt-5.6-solhigh, caught by fuzzy). Remove once LiteLLM carries it." },
+    "gpt-5.6-terra":    { "input": 2.5,  "output": 15,   "cache_read": 0.25,  "cache_write": 3.125, "note": "GPT-5.6 balanced default tier. See gpt-5.6-sol." },
+    "gpt-5.6-luna":     { "input": 1,    "output": 6,    "cache_read": 0.1,   "cache_write": 1.25,  "note": "GPT-5.6 lightweight/cost-efficient tier. See gpt-5.6-sol." },
     "kiro-agent":       { "input": 3,    "output": 15,   "cache_read": 0.3,   "cache_write": 3.75 },
     "kiro-cli-agent":   { "input": 3,    "output": 15,   "cache_read": 0.3,   "cache_write": 3.75 },
     "hy3-preview-agent":{ "input": 0.167, "output": 0.556, "cache_read": 0.056, "cache_write": 0.167, "note": "Tencent Hunyuan Hy3 preview (CodeBuddy/WorkBuddy backend). Official TokenHub rate: 1.2 / 0.4 (cache hit) / 4.0 RMB per MTok in/read/out, converted at ~7.2 RMB/USD. DeepSeek-style cache: no write surcharge, so cache_write = input." },
@@ -64,6 +67,10 @@
     "auto": "composer-1"
   },
   "fuzzy": [
+    { "match": "gpt-5.6-sol",            "ref": "gpt-5.6-sol" },
+    { "match": "gpt-5.6-terra",          "ref": "gpt-5.6-terra" },
+    { "match": "gpt-5.6-luna",           "ref": "gpt-5.6-luna" },
+    { "match": "gpt-5.6",                "ref": "gpt-5.6-terra" },
     { "match": "kiro",                   "ref": "kiro-cli-agent" },
     { "match": "hy3",                    "ref": "hy3-preview-agent" },
     { "match": "composer",               "ref": "composer-1" },
