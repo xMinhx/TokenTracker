@@ -367,4 +367,45 @@ test("gemini/antigravity WSL path resolves on Windows both mode", (t) => {
   assert.equal(r.wsl, wslDir);
 });
 
+// ── Codex CLI & OpenCode path resolution (PR #261) ────────────────────────────
+
+test("codex/opencode native paths default correctly", (t) => {
+  mockPlatform(t, "linux");
+  const home = "/home/user";
+  const rCodex = resolveInstallPaths(
+    { nativeValue: path.join(home, ".codex") },
+    {},
+    {},
+  );
+  assert.equal(rCodex.native, path.join(home, ".codex"));
+  assert.equal(rCodex.wsl, null);
+
+  const rOpencode = resolveInstallPaths(
+    { nativeValue: path.join(home, ".config", "opencode") },
+    {},
+    {},
+  );
+  assert.equal(rOpencode.native, path.join(home, ".config", "opencode"));
+  assert.equal(rOpencode.wsl, null);
+});
+
+test("codex/opencode WSL paths resolve on Windows both mode", (t) => {
+  mockPlatform(t, "win32");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ir-opencode-wsl-"));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const nativeDir = path.join(tmpDir, "native");
+  const wslDir = path.join(tmpDir, "wsl");
+  fs.mkdirSync(nativeDir, { recursive: true });
+  fs.mkdirSync(wslDir, { recursive: true });
+
+  const r = resolveInstallPaths(
+    { nativeValue: nativeDir, wslValue: wslDir },
+    { TOKENTRACKER_WSL_MODE: "both" },
+    { runWsl: () => "Ubuntu\n", existsSync: () => true },
+  );
+  assert.equal(r.native, nativeDir);
+  assert.equal(r.wsl, wslDir);
+});
+
+
 
