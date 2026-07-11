@@ -389,6 +389,33 @@ test("parseCopilotAppDbIncremental clamps cached input to raw input delta", asyn
   }
 });
 
+test("parseCopilotAppDbIncremental clamps reasoning to inclusive output totals", async () => {
+  const { dir, dbPath } = makeCopilotAppDb([
+    {
+      id: "reasoning-heavy",
+      session_type: "project",
+      model: "gpt-5.5",
+      created_at: "2026-07-07T14:35:00Z",
+      updated_at: "2026-07-07T14:36:00Z",
+      total_input_tokens: 100,
+      total_output_tokens: 50,
+      total_cached_tokens: 0,
+      total_reasoning_tokens: 80,
+    },
+  ]);
+  try {
+    const queuePath = path.join(dir, "queue.jsonl");
+    await parseCopilotAppDbIncremental({ dbPath, cursors: {}, queuePath });
+    const [row] = readQueue(queuePath).filter((entry) => entry.source === "copilot");
+    assert.equal(row.input_tokens, 100);
+    assert.equal(row.output_tokens, 0);
+    assert.equal(row.reasoning_output_tokens, 50);
+    assert.equal(row.total_tokens, 150);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("parseCopilotAppDbIncremental isolates one DB read failure without dropping healthy progress", async () => {
   const { dir, dbPath } = makeCopilotAppDb([
     {

@@ -5314,6 +5314,38 @@ test("parseCopilotIncremental normalizes CLI cache writes, reasoning, and dotted
   }
 });
 
+test("parseCopilotIncremental clamps reasoning to inclusive output tokens", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
+  try {
+    const otelPath = path.join(tmp, "copilot-otel-reasoning-clamp.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    writeCopilotOtelFile(otelPath, [
+      makeCopilotChatSpan({
+        traceId: "t-reasoning-clamp",
+        spanId: "s-reasoning-clamp",
+        inputTokens: 100,
+        outputTokens: 5,
+        cacheRead: 10,
+        cacheWrite: 20,
+        reasoning: 8,
+      }),
+    ]);
+
+    await parseCopilotIncremental({ otelPaths: [otelPath], cursors: {}, queuePath });
+    const [row] = (await readJsonLines(queuePath)).filter(
+      (entry) => entry.source === "copilot",
+    );
+    assert.equal(row.input_tokens, 70);
+    assert.equal(row.cached_input_tokens, 10);
+    assert.equal(row.cache_creation_input_tokens, 20);
+    assert.equal(row.output_tokens, 0);
+    assert.equal(row.reasoning_output_tokens, 5);
+    assert.equal(row.total_tokens, 105);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseCopilotIncremental dedups by traceId:spanId across runs", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
   try {
