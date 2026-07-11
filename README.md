@@ -273,6 +273,21 @@ Most users never need this — defaults are sensible. For advanced setups:
 | `GROK_HOME` | Legacy Grok Build directory override, used when `TOKENTRACKER_GROK_HOME` is unset | `~/.grok` |
 | `TOKENTRACKER_ANTIGRAVITY_HOME` | Force a single Antigravity Skills directory (auto-detects `~/.gemini/antigravity` + `~/.gemini/antigravity-ide` otherwise) | auto |
 
+### 🐧 Windows Subsystem for Linux (WSL) Auto-Discovery
+
+If you run AI coding agents inside WSL on Windows, TokenTracker can auto-discover and aggregate metrics from both native Windows and WSL installations. 
+
+Configure this behavior using the `TOKENTRACKER_WSL_MODE` environment variable:
+* `both` (Recommended): Scans and aggregates metrics from both native Windows and WSL.
+* `wsl-first` (Default): Checks WSL first; if found, uses WSL metrics, otherwise falls back to Windows.
+* `native-first`: Checks native Windows first; if found, uses Windows metrics, otherwise falls back to WSL.
+* `wsl-only`: Scans WSL environment only.
+* `native-only`: Scans native Windows environment only.
+
+Supported providers for WSL auto-discovery:
+* **File-list & Active CLIs:** Every Code, Kimi (legacy & Code), Gemini CLI, Antigravity, OpenCode, Codex CLI, CodeBuddy, WorkBuddy, oh-my-pi, pi, Grok Build, GitHub Copilot, Roo Code, Craft, Kilo Code.
+* **SQLite-based DBs:** Hermes, Zed Agent, Goose, Droid, Kilo CLI, Mimo Code, ZCode.
+
 ---
 
 ## 🛠️ Development
