@@ -32,6 +32,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _petSizeSmall;
     private readonly ToolStripMenuItem _petSizeMedium;
     private readonly ToolStripMenuItem _petSizeLarge;
+    private readonly ToolStripMenuItem _petCharacterItem;
+    private readonly ToolStripMenuItem _petCharacterClawd;
+    private readonly ToolStripMenuItem _petCharacterSprout;
+    private readonly ToolStripMenuItem _petCharacterByte;
+    private readonly ToolStripMenuItem _petCharacterEmber;
     private readonly ToolStripMenuItem _startupItem;
     private readonly ToolStripMenuItem _checkUpdatesItem;
 
@@ -44,6 +49,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _petCtxSizeSmall;
     private readonly ToolStripMenuItem _petCtxSizeMedium;
     private readonly ToolStripMenuItem _petCtxSizeLarge;
+    private readonly ToolStripMenuItem _petCtxCharacterItem;
+    private readonly ToolStripMenuItem _petCtxCharacterClawd;
+    private readonly ToolStripMenuItem _petCtxCharacterSprout;
+    private readonly ToolStripMenuItem _petCtxCharacterByte;
+    private readonly ToolStripMenuItem _petCtxCharacterEmber;
     private readonly ToolStripMenuItem _petCtxClose;
     private readonly ToolStripMenuItem _starItem;
     private readonly ToolStripMenuItem _quitItem;
@@ -84,6 +94,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _petSizeItem.DropDownItems.Add(_petSizeMedium);
         _petSizeItem.DropDownItems.Add(_petSizeLarge);
         StyleSubmenu(_petSizeItem.DropDown);
+        _petCharacterClawd = CreateMenuItem("", (_, _) => SetPetCharacter(PetWindow.CharacterClawd));
+        _petCharacterSprout = CreateMenuItem("", (_, _) => SetPetCharacter(PetWindow.CharacterSprout));
+        _petCharacterByte = CreateMenuItem("", (_, _) => SetPetCharacter(PetWindow.CharacterByte));
+        _petCharacterEmber = CreateMenuItem("", (_, _) => SetPetCharacter(PetWindow.CharacterEmber));
+        _petCharacterItem = CreateMenuItem("", (_, _) => { });
+        _petCharacterItem.DropDownItems.AddRange([
+            _petCharacterClawd, _petCharacterSprout, _petCharacterByte, _petCharacterEmber]);
+        StyleSubmenu(_petCharacterItem.DropDown);
 
         // Pet right-click context menu: open/close dashboard / size / close pet.
         // The first item toggles the dashboard; its label flips to "Close" while it's open.
@@ -96,6 +114,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _petCtxSizeItem.DropDownItems.Add(_petCtxSizeSmall);
         _petCtxSizeItem.DropDownItems.Add(_petCtxSizeMedium);
         _petCtxSizeItem.DropDownItems.Add(_petCtxSizeLarge);
+        _petCtxCharacterClawd = CreateMenuItem("", (_, _) => SetPetCharacter(PetWindow.CharacterClawd));
+        _petCtxCharacterSprout = CreateMenuItem("", (_, _) => SetPetCharacter(PetWindow.CharacterSprout));
+        _petCtxCharacterByte = CreateMenuItem("", (_, _) => SetPetCharacter(PetWindow.CharacterByte));
+        _petCtxCharacterEmber = CreateMenuItem("", (_, _) => SetPetCharacter(PetWindow.CharacterEmber));
+        _petCtxCharacterItem = CreateMenuItem("", (_, _) => { });
+        _petCtxCharacterItem.DropDownItems.AddRange([
+            _petCtxCharacterClawd, _petCtxCharacterSprout, _petCtxCharacterByte, _petCtxCharacterEmber]);
         _petCtxClose = CreateMenuItem("", (_, _) => ClosePet());
         _petMenu = new ContextMenuStrip
         {
@@ -111,12 +136,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _petMenu.Items.Add(_petCtxOpen);
         _petMenu.Items.Add(_petCtxSync);
         _petMenu.Items.Add(_petCtxSizeItem);
+        _petMenu.Items.Add(_petCtxCharacterItem);
         _petMenu.Items.Add(CreateSeparator());
         _petMenu.Items.Add(_petCtxClose);
         StyleSubmenu(_petCtxSizeItem.DropDown);
+        StyleSubmenu(_petCtxCharacterItem.DropDown);
         _petMenu.Opened += (_, _) => TrayMenuRenderer.ApplyRoundedRegion(_petMenu);
         _petMenu.SizeChanged += (_, _) => TrayMenuRenderer.ApplyRoundedRegion(_petMenu);
-        _petMenu.Opening += (_, _) => { UpdatePetSizeChecks(); UpdatePetDashboardItem(); };
+        _petMenu.Opening += (_, _) => { UpdatePetSizeChecks(); UpdatePetCharacterChecks(); UpdatePetDashboardItem(); };
 
         _startupItem = CreateMenuItem("", OnToggleStartup);
         _startupItem.Checked = LaunchAtStartup.IsEnabled;
@@ -142,6 +169,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _menu.Items.Add(_syncItem);
         _menu.Items.Add(_petItem);
         _menu.Items.Add(_petSizeItem);
+        _menu.Items.Add(_petCharacterItem);
         _menu.Items.Add(CreateSeparator());
         _menu.Items.Add(_startupItem);
         _menu.Items.Add(_checkUpdatesItem);
@@ -161,6 +189,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             RefreshSummary();
             UpdatePetMenuText();
             UpdatePetSizeChecks();
+            UpdatePetCharacterChecks();
         };
 
         _trayIcon = new NotifyIcon
@@ -275,6 +304,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _petSizeSmall.Text = _strings.SizeSmall;
         _petSizeMedium.Text = _strings.SizeMedium;
         _petSizeLarge.Text = _strings.SizeLarge;
+        _petCharacterItem.Text = _strings.PetCharacter;
+        _petCharacterClawd.Text = _strings.CharacterClawd;
+        _petCharacterSprout.Text = _strings.CharacterSprout;
+        _petCharacterByte.Text = _strings.CharacterByte;
+        _petCharacterEmber.Text = _strings.CharacterEmber;
         // Pet right-click context menu.
         _petMenu.Font = _menuFont;
         _petCtxOpen.Text = _strings.OpenDashboard;
@@ -283,8 +317,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _petCtxSizeSmall.Text = _strings.SizeSmall;
         _petCtxSizeMedium.Text = _strings.SizeMedium;
         _petCtxSizeLarge.Text = _strings.SizeLarge;
+        _petCtxCharacterItem.Text = _strings.PetCharacter;
+        _petCtxCharacterClawd.Text = _strings.CharacterClawd;
+        _petCtxCharacterSprout.Text = _strings.CharacterSprout;
+        _petCtxCharacterByte.Text = _strings.CharacterByte;
+        _petCtxCharacterEmber.Text = _strings.CharacterEmber;
         _petCtxClose.Text = _strings.ClosePet;
         UpdatePetSizeChecks();
+        UpdatePetCharacterChecks();
         _startupItem.Text = _strings.LaunchAtLogin;
         _starItem.Text = _strings.StarOnGitHub;
         _quitItem.Text = _strings.Quit;
@@ -379,6 +419,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             RefreshSummary();      // push the current numbers right away
             _poller.RefreshNow();  // and fetch the freshest (now incl. rich stats)
         }
+        PushDashboardPetSettings();
     }
 
     private void EnsurePet()
@@ -402,6 +443,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (_petWindow is not null) _petWindow.ApplySize(normalized);
         else PetWindow.PersistSize(normalized);
         UpdatePetSizeChecks(normalized);
+        PushDashboardPetSettings();
     }
 
     /// <summary>Tick the active size in both the tray submenu and the pet context menu.</summary>
@@ -414,6 +456,28 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _petCtxSizeSmall.Checked = s == PetWindow.SizeSmall;
         _petCtxSizeMedium.Checked = s == PetWindow.SizeMedium;
         _petCtxSizeLarge.Checked = s == PetWindow.SizeLarge;
+    }
+
+    private void SetPetCharacter(string character)
+    {
+        var normalized = PetWindow.NormalizeCharacter(character);
+        if (_petWindow is not null) _petWindow.ApplyCharacter(normalized);
+        else PetWindow.PersistCharacter(normalized);
+        UpdatePetCharacterChecks(normalized);
+        PushDashboardPetSettings();
+    }
+
+    private void UpdatePetCharacterChecks(string? character = null)
+    {
+        var selected = PetWindow.NormalizeCharacter(character ?? PetWindow.CurrentCharacter);
+        _petCharacterClawd.Checked = selected == PetWindow.CharacterClawd;
+        _petCharacterSprout.Checked = selected == PetWindow.CharacterSprout;
+        _petCharacterByte.Checked = selected == PetWindow.CharacterByte;
+        _petCharacterEmber.Checked = selected == PetWindow.CharacterEmber;
+        _petCtxCharacterClawd.Checked = selected == PetWindow.CharacterClawd;
+        _petCtxCharacterSprout.Checked = selected == PetWindow.CharacterSprout;
+        _petCtxCharacterByte.Checked = selected == PetWindow.CharacterByte;
+        _petCtxCharacterEmber.Checked = selected == PetWindow.CharacterEmber;
     }
 
     /// <summary>True while the dashboard window is shown (not hidden / minimized).</summary>
@@ -432,6 +496,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         UpdatePetMenuText();
         UpdatePetDashboardItem();
         UpdatePetSizeChecks();
+        UpdatePetCharacterChecks();
         _petMenu.Show(System.Windows.Forms.Cursor.Position);
     }
 
@@ -443,6 +508,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _petWindow.StoreVisible(false);
         _poller.IncludeRichStats = false;   // stop gathering the pet-only stats
         UpdatePetMenuText();
+        PushDashboardPetSettings();
     }
 
     private void EnsureDashboard()
@@ -457,6 +523,49 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _dashboard.CurrencyChanged += () => PostToUi(() => { RefreshSummary(); PersistCurrencyFromDashboard(); });
         _dashboard.LocaleChanged += () => PostToUi(RefreshLocaleFromDashboard);
         _dashboard.ThemeChanged += () => PostToUi(RefreshThemeFromDashboard);
+        _dashboard.PetSettingsRequested += () => PostToUi(PushDashboardPetSettings);
+        _dashboard.PetSettingChanged += (key, value) => PostToUi(() => ApplyDashboardPetSetting(key, value));
+    }
+
+    private void ApplyDashboardPetSetting(string key, string? value)
+    {
+        switch (key)
+        {
+            case "visible":
+                EnsurePet();
+                if (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    _petWindow!.ShowPet();
+                    _petWindow.StoreVisible(true);
+                    _poller.IncludeRichStats = true;
+                    _poller.RefreshNow();
+                }
+                else
+                {
+                    _petWindow!.HidePet();
+                    _petWindow.StoreVisible(false);
+                    _poller.IncludeRichStats = false;
+                }
+                UpdatePetMenuText();
+                // Echo the applied state back; the size/character cases push inside
+                // SetPetSize / SetPetCharacter already, so no unconditional re-push.
+                PushDashboardPetSettings();
+                break;
+            case "size":
+                SetPetSize(value ?? PetWindow.SizeMedium);
+                break;
+            case "character":
+                SetPetCharacter(value ?? PetWindow.CharacterClawd);
+                break;
+        }
+    }
+
+    private void PushDashboardPetSettings()
+    {
+        _dashboard?.PushPetSettings(
+            _petWindow?.IsVisible == true,
+            PetWindow.CurrentSize,
+            PetWindow.CurrentCharacter);
     }
 
     /// <summary>

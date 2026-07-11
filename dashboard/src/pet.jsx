@@ -6,6 +6,13 @@ import {
   normalizePetLocale,
   petLabels,
 } from "./lib/pet-quips.js";
+import {
+  normalizePetCharacter,
+  pickPetAmbientState,
+  resolvePetState,
+} from "./lib/pet-personality.js";
+import { petVisualScale } from "./lib/pet-appearance.js";
+import { PetAtlasAnimated } from "./ui/foundation/PetAtlasAnimated.jsx";
 
 /**
  * Standalone floating-pet entry for the Windows tray app (PetWindow.cs loads
@@ -14,9 +21,8 @@ import {
  * global styles.
  *
  * Behaviour mirrors the macOS popover companion (ClawdCompanionView.swift):
- *   • Auto state: today's token VOLUME drives only the hover bubble, NOT the
- *     animation. Calm idle (living/look, rotating every 12–25s) is the resting
- *     state; sleeping at 0 usage; disconnected when the API is unreachable.
+ *   • Auto state: live sync/typing/errors win; usage volume, streak and model variety
+ *     feed short ambient scenes (thinking/juggling/wizard) every 12–25s.
  *   • tap (click in place) → cycles the "fun" animations in order, 2.5s each.
  *   • drag (left-press + move) → moves the window (host runs the OS move loop).
  *   • right-click → opens the full dashboard panel.
@@ -58,6 +64,10 @@ const EYE_GLANCE_UNITS = 0.6;
 // drops from y6 to y10–15), so tapping into them makes it visibly lie down. The crab
 // stays horizontally anchored (feet/shadow pinned) — it just lowers, by design.
 const TAP_ANIMATIONS = [
+  "happy",
+  "working-wizard",
+  "working-juggling",
+  "working-thinking",
   "working-ultrathink",
   "working-typing",
   "disconnected",
@@ -67,8 +77,6 @@ const TAP_ANIMATIONS = [
   "error",
 ];
 // Idle variety: rotate every 12–25s, weighted toward the calm "living" pose.
-const IDLE_VARIANTS = ["idle-living", "idle-look", "idle-living", "idle-living", "idle-look"];
-
 function readPetUsage() {
   const tk = Number(window.__ttPetTokens);
   const cost = Number(window.__ttPetCostUsd);
@@ -117,6 +125,10 @@ function readPetLocale() {
   return normalizePetLocale(typeof window !== "undefined" ? window.__ttPetLocale : null);
 }
 
+function readPetCharacter() {
+  return normalizePetCharacter(typeof window !== "undefined" ? window.__ttPetCharacter : null);
+}
+
 function post(type) {
   try { window.chrome?.webview?.postMessage(type); } catch { /* not in WebView2 */ }
 }
@@ -151,7 +163,12 @@ const PET_STATE_TO_PATH = {
   "collapsing": "idle/collapse.svg",
   "waking": "sleep/wake.svg",
   "working-typing": "working/typing.svg",
+  "working-thinking": "working/thinking.svg",
   "working-ultrathink": "working/ultrathink.svg",
+  "working-juggling": "working/juggling.svg",
+  "working-wizard": "working/wizard.svg",
+  "working-overheated": "working/overheated.svg",
+  "happy": "happy.svg",
   "sleeping": "sleep/sleeping.svg",
   "disconnected": "status/disconnected.svg",
   "error": "status/error.svg",
@@ -260,6 +277,13 @@ function PetClawd({ state, size, leanX }) {
   );
 }
 
+function PetCharacterSprite({ state, size, leanX, character }) {
+  if (character !== "clawd") {
+    return <PetAtlasAnimated character={character} state={state} size={size} />;
+  }
+  return <PetClawd state={state} size={size * petVisualScale(character)} leanX={leanX} />;
+}
+
 /** Compact translucent pill shown in the top band (usage on hover, or a tap quip).
     Wraps to at most two lines (clamped with an ellipsis) so the longer data-rich quips
     show in full within this fixed, content-clipping window instead of truncating. */
@@ -296,6 +320,7 @@ function Pet() {
   const [connected, setConnected] = useState(readPetConnected);
   const [currency, setCurrency] = useState(readPetCurrency);
   const [locale, setLocale] = useState(readPetLocale);
+  const [character, setCharacter] = useState(readPetCharacter);
   const [isSyncing, setIsSyncing] = useState(false);
   const [userTyping, setUserTyping] = useState(false);
   const [rage, setRage] = useState(false);
@@ -385,6 +410,12 @@ function Pet() {
     window.addEventListener("pet:locale", update);
     return () => window.removeEventListener("pet:locale", update);
   }, []);
+  useEffect(() => {
+    const update = () => setCharacter(readPetCharacter());
+    update();
+    window.addEventListener("pet:character", update);
+    return () => window.removeEventListener("pet:character", update);
+  }, []);
   // Syncing state pushed by the native host (drives the typing animation, like macOS).
   useEffect(() => {
     const update = () => setIsSyncing(Boolean(window.__ttPetSyncing));
@@ -433,14 +464,15 @@ function Pet() {
     if (!hovering) setLeanX(0);
   }, [hovering]);
 
-  // Idle variant rotation (macOS startIdleVariantLoop): 12–25s, weighted calm.
+  // Ambient rotation: real usage context unlocks short scenes, while calm poses remain
+  // heavily weighted to avoid an always-busy pet and unnecessary continuous animation.
   useEffect(() => {
     let cancelled = false;
     const schedule = () => {
       const delay = 12_000 + Math.random() * 13_000;
       idleTimer.current = window.setTimeout(() => {
         if (cancelled) return;
-        setIdleVariant(IDLE_VARIANTS[Math.floor(Math.random() * IDLE_VARIANTS.length)]);
+        setIdleVariant(pickPetAmbientState(readPetStats()));
         schedule();
       }, delay);
     };
@@ -450,21 +482,25 @@ function Pet() {
 
   useEffect(() => () => clearTimeout(tapTimer.current), []);
 
-  // Auto state — overheat(rage) > disconnected > syncing/you-typing > sleeping(0) >
-  // idle. Token volume affects only the bubble, not the animation.
+  // Urgent live context wins; usage data shapes the calmer ambient state above.
   const isDisconnected = !connected;
-  let autoState;
-  if (rage) autoState = "error";
-  else if (isDisconnected) autoState = "disconnected";
-  else if (isSyncing || userTyping) autoState = "working-typing";
-  else if (today.tokens === 0) autoState = "sleeping";
-  else autoState = idleVariant;
+  let autoState = resolvePetState({
+    rage,
+    connected,
+    syncing: isSyncing,
+    typing: userTyping,
+    celebrating: Boolean(modelStatus),
+    todayTokens: today.tokens,
+    ambientState: idleVariant,
+  });
 
-  // Apply sleep/wake override — but never mask an active working/error/disconnected
-  // state (parity with macOS: the pet shouldn't doze mid-sync).
+  // Apply sleep/wake override — but never mask an active working/celebration/error/
+  // disconnected state (parity with macOS isBusy: workingTyping / happy / disconnected /
+  // error; "working-overheated" here is the rage gag, this platform's error analogue).
   const busy =
     autoState === "working-typing" ||
-    autoState === "error" ||
+    autoState === "happy" ||
+    autoState === "working-overheated" ||
     autoState === "disconnected";
   if (sleepState && !busy) {
     autoState = sleepState;
@@ -472,7 +508,7 @@ function Pet() {
 
   // Mini mode state redirection
   if (miniMode) {
-    if (autoState === "error" || autoState === "disconnected") {
+    if (autoState === "working-overheated" || autoState === "disconnected") {
       autoState = "mini-alert";
     } else if (
       autoState === "sleeping" ||
@@ -483,8 +519,10 @@ function Pet() {
       autoState = "mini-sleep";
     } else if (autoState === "waking") {
       autoState = "mini-enter";
-    } else if (autoState === "working-typing") {
+    } else if (autoState.startsWith("working-")) {
       autoState = "mini-crabwalk";
+    } else if (autoState === "happy") {
+      autoState = "mini-happy";
     } else {
       autoState = hovering ? "mini-peek" : "mini-idle";
     }
@@ -621,7 +659,7 @@ function Pet() {
             transition: "transform 0.12s ease-out",
           }}
         >
-          <PetClawd state={state} size={size} leanX={leanX} />
+          <PetCharacterSprite state={state} size={size} leanX={leanX} character={character} />
         </div>
       </div>
     </div>

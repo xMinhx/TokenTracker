@@ -53,7 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NativeBridge.shared.configure(
             viewModel: viewModel,
-            launchAtLoginManager: launchAtLoginManager
+            launchAtLoginManager: launchAtLoginManager,
+            desktopPetController: desktopPetController
         )
         registerWakeCatchUpObservers()
 

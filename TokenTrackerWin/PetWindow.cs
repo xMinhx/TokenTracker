@@ -52,6 +52,7 @@ internal sealed class PetWindow : Window
     private decimal _curRate = 1m;
     private string _locale = "en";
     private bool _syncing;
+    private string _character = CurrentCharacter;
     private UsagePoller.UsageStats _stats;
     private bool _connected = true;
 
@@ -512,6 +513,7 @@ internal sealed class PetWindow : Window
         var sym = System.Text.Json.JsonSerializer.Serialize(_curSymbol);
         var rate = _curRate.ToString(inv);
         var loc = System.Text.Json.JsonSerializer.Serialize(_locale);
+        var character = System.Text.Json.JsonSerializer.Serialize(_character);
         var syncing = _syncing ? "true" : "false";
         var cost = _stats.TodayCostUsd.ToString(inv);
         var connected = _connected ? "true" : "false";
@@ -535,6 +537,7 @@ internal sealed class PetWindow : Window
             _ = _webView.CoreWebView2.ExecuteScriptAsync(
                 $"window.__ttPetCurrency={{symbol:{sym},rate:{rate}}};" +
                 $"window.__ttPetLocale={loc};" +
+                $"window.__ttPetCharacter={character};" +
                 $"window.__ttPetSyncing={syncing};" +
                 $"window.__ttPetTokens={_stats.TodayTokens};" +
                 $"window.__ttPetCostUsd={cost};" +
@@ -543,6 +546,7 @@ internal sealed class PetWindow : Window
                 $"window.__ttPetMiniMode={mini};" +
                 "window.dispatchEvent(new Event('pet:currency'));" +
                 "window.dispatchEvent(new Event('pet:locale'));" +
+                "window.dispatchEvent(new Event('pet:character'));" +
                 "window.dispatchEvent(new Event('pet:syncing'));" +
                 "window.dispatchEvent(new Event('pet:usage'));" +
                 "window.dispatchEvent(new Event('pet:connected'));" +
@@ -566,6 +570,21 @@ internal sealed class PetWindow : Window
     {
         var normalized = NormalizeSize(size);
         WriteSettings(s => s["PetSize"] = normalized);
+    }
+
+    /// <summary>Switch the visible companion identity and persist it.</summary>
+    public void ApplyCharacter(string character)
+    {
+        _character = NormalizeCharacter(character);
+        WriteSettings(s => s["PetCharacter"] = _character);
+        PushContext();
+    }
+
+    /// <summary>Persist a character choice without creating the floating window.</summary>
+    public static void PersistCharacter(string character)
+    {
+        var normalized = NormalizeCharacter(character);
+        WriteSettings(s => s["PetCharacter"] = normalized);
     }
 
     public void TogglePet()
@@ -630,6 +649,11 @@ internal sealed class PetWindow : Window
     public const string SizeMedium = "medium";
     public const string SizeLarge = "large";
 
+    public const string CharacterClawd = "clawd";
+    public const string CharacterSprout = "sprout";
+    public const string CharacterByte = "byte";
+    public const string CharacterEmber = "ember";
+
     public static string NormalizeSize(string? value)
     {
         return (value ?? "").Trim().ToLowerInvariant() switch
@@ -637,6 +661,17 @@ internal sealed class PetWindow : Window
             SizeSmall => SizeSmall,
             SizeLarge => SizeLarge,
             _ => SizeMedium,
+        };
+    }
+
+    public static string NormalizeCharacter(string? value)
+    {
+        return (value ?? "").Trim().ToLowerInvariant() switch
+        {
+            CharacterSprout => CharacterSprout,
+            CharacterByte => CharacterByte,
+            CharacterEmber => CharacterEmber,
+            _ => CharacterClawd,
         };
     }
 
@@ -667,6 +702,20 @@ internal sealed class PetWindow : Window
                 return NormalizeSize(s?["PetSize"]?.GetValue<string>());
             }
             catch { return SizeMedium; }
+        }
+    }
+
+    public static string CurrentCharacter
+    {
+        get
+        {
+            try
+            {
+                if (!File.Exists(SettingsPath)) return CharacterClawd;
+                var s = JsonNode.Parse(File.ReadAllText(SettingsPath))?.AsObject();
+                return NormalizeCharacter(s?["PetCharacter"]?.GetValue<string>());
+            }
+            catch { return CharacterClawd; }
         }
     }
 

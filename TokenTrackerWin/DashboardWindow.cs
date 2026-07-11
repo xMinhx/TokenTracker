@@ -59,6 +59,9 @@ internal sealed class DashboardWindow : Window
     /// <summary>Raised (on the UI thread) when the dashboard's theme localStorage changes.</summary>
     public event Action? ThemeChanged;
 
+    public event Action? PetSettingsRequested;
+    public event Action<string, string?>? PetSettingChanged;
+
     public DashboardWindow(ServerManager server)
     {
         _server = server;
@@ -324,6 +327,23 @@ internal sealed class DashboardWindow : Window
                             CurrencyChanged?.Invoke();
                         }
                     }
+                    else if (t.GetString() == "getPetSettings")
+                    {
+                        PetSettingsRequested?.Invoke();
+                    }
+                    else if (t.GetString() == "setPetSetting"
+                             && doc.RootElement.TryGetProperty("key", out var petKey)
+                             && doc.RootElement.TryGetProperty("value", out var petValue))
+                    {
+                        var value = petValue.ValueKind switch
+                        {
+                            JsonValueKind.String => petValue.GetString(),
+                            JsonValueKind.True => "true",
+                            JsonValueKind.False => "false",
+                            _ => petValue.GetRawText(),
+                        };
+                        if (petKey.GetString() is { } key) PetSettingChanged?.Invoke(key, value);
+                    }
                 }
                 catch { /* not a JSON message we handle */ }
                 return;
@@ -386,6 +406,18 @@ internal sealed class DashboardWindow : Window
         // ?app=1 → dashboard renders in native-app layout (Clawd companion, native
         // component treatment, transparent root + 28px drag strip), matching macOS.
         NavigateWhenServerReady("/?app=1");
+    }
+
+    public void PushPetSettings(bool visible, string size, string character)
+    {
+        if (!_coreReady) return;
+        var json = JsonSerializer.Serialize(new { visible, size, character });
+        try
+        {
+            _ = _webView.CoreWebView2.ExecuteScriptAsync(
+                $"window.dispatchEvent(new CustomEvent('native:petSettings', {{detail:{json}}}));");
+        }
+        catch { /* page is navigating */ }
     }
 
     private void OnServerStatusChanged(ServerManager.ServerStatus status)

@@ -1077,4 +1077,32 @@ settings.menubar.updates.modalConfirm,ui,SettingsPage,NativeAppFooter,updates_co
 settings.menubar.updates.modalCancel,ui,SettingsPage,NativeAppFooter,updates_cancel,"Cancel","取消",active
 settings.menubar.updates.footerCore,ui,SettingsPage,NativeAppFooter,updates_footer_core,"TokenTracker v{{version}}",,active
 settings.menubar.updates.footerCombined,ui,SettingsPage,NativeAppFooter,updates_footer_combined,"TokenTrackerBar v{{barVersion}} (Core v{{coreVersion}})",,active
-
+nav.pet,shared,*,Sidebar,nav_pet,"Pet",,active
+pet.page.eyebrow,dashboard,PetPage,PetPage,eyebrow,"Desktop companion",,active
+pet.page.title,dashboard,PetPage,PetPage,title,"Pet",,active
+pet.page.subtitle,dashboard,PetPage,PetPage,subtitle,"Choose a companion and preview how it reacts to your real AI activity.",,active
+pet.preview.states,dashboard,PetPage,PetPage,preview_states,"Preview pet states",,active
+pet.controls.title,dashboard,PetPage,PetPage,controls_title,"Desktop controls",,active
+pet.controls.show,dashboard,PetPage,PetPage,show,"Show desktop pet",,active
+pet.controls.show_hint,dashboard,PetPage,PetPage,show_hint,"Keep your companion above other windows.",,active
+pet.controls.size,dashboard,PetPage,PetPage,size,"Pet size",,active
+pet.controls.native_only,dashboard,PetPage,PetPage,native_only,"Open this page in the TokenTracker desktop app to control the live pet.",,active
+pet.characters.title,dashboard,PetPage,PetPage,characters_title,"Choose your companion",,active
+pet.characters.subtitle,dashboard,PetPage,PetPage,characters_subtitle,"Every character shares the full state system, with its own palette and silhouette.",,active
+pet.character.clawd,dashboard,PetPage,PetPage,character_clawd,"Clawd",,active
+pet.character.clawd_desc,dashboard,PetPage,PetPage,character_clawd_desc,"The original claw-shaped token keeper.",,active
+pet.character.sprout,dashboard,PetPage,PetPage,character_sprout,"Sprout",,active
+pet.character.sprout_desc,dashboard,PetPage,PetPage,character_sprout_desc,"A leaf-eared seedling spirit with tiny root feet.",,active
+pet.character.byte,dashboard,PetPage,PetPage,character_byte,"Byte",,active
+pet.character.byte_desc,dashboard,PetPage,PetPage,character_byte_desc,"A hovering terminal robot with expressive screen eyes.",,active
+pet.character.ember,dashboard,PetPage,PetPage,character_ember,"Ember",,active
+pet.character.ember_desc,dashboard,PetPage,PetPage,character_ember_desc,"A flame-tailed fox spirit that celebrates hot streaks.",,active
+pet.state.calm,dashboard,PetPage,PetPage,state_calm,"Calm",,active
+pet.state.focus,dashboard,PetPage,PetPage,state_focus,"Focus",,active
+pet.state.multitask,dashboard,PetPage,PetPage,state_multitask,"Multi-model",,active
+pet.state.streak,dashboard,PetPage,PetPage,state_streak,"Streak",,active
+pet.state.celebrate,dashboard,PetPage,PetPage,state_celebrate,"New usage",,active
+pet.state.rest,dashboard,PetPage,PetPage,state_rest,"Rest",,active
+pet.size.small,dashboard,PetPage,PetPage,size_small,"Small",,active
+pet.size.medium,dashboard,PetPage,PetPage,size_medium,"Medium",,active
+pet.size.large,dashboard,PetPage,PetPage,size_large,"Large",,active

@@ -17,13 +17,19 @@ final class NativeBridge {
     weak var webView: WKWebView?
     private weak var viewModel: DashboardViewModel?
     private weak var launchAtLoginManager: LaunchAtLoginManager?
+    private weak var desktopPetController: DesktopPetWindowController?
     private var cancellables = Set<AnyCancellable>()
 
     private init() {}
 
-    func configure(viewModel: DashboardViewModel, launchAtLoginManager: LaunchAtLoginManager) {
+    func configure(
+        viewModel: DashboardViewModel,
+        launchAtLoginManager: LaunchAtLoginManager,
+        desktopPetController: DesktopPetWindowController
+    ) {
         self.viewModel = viewModel
         self.launchAtLoginManager = launchAtLoginManager
+        self.desktopPetController = desktopPetController
 
         cancellables.removeAll()
         // Re-push settings whenever selectable menu-bar items change so the
@@ -79,6 +85,8 @@ final class NativeBridge {
         switch type {
         case "getSettings":
             pushSettings()
+        case "getPetSettings":
+            pushPetSettings()
         case "getSystemAppearance":
             DashboardWindowController.shared.pushCurrentSystemAppearanceToWeb()
         case "setChromeAppearance":
@@ -91,6 +99,10 @@ final class NativeBridge {
         case "setSetting":
             if let key = dict["key"] as? String {
                 applySetting(key: key, value: dict["value"])
+            }
+        case "setPetSetting":
+            if let key = dict["key"] as? String {
+                applyPetSetting(key: key, value: dict["value"])
             }
         case "action":
             if let name = dict["name"] as? String {
@@ -169,6 +181,19 @@ final class NativeBridge {
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
               let json = String(data: data, encoding: .utf8) else { return }
         let js = "window.dispatchEvent(new CustomEvent('native:settings', { detail: \(json) }));"
+        webView?.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    func pushPetSettings() {
+        guard let controller = desktopPetController else { return }
+        let payload: [String: Any] = [
+            "visible": controller.isVisible,
+            "character": PetCharacterStore.shared.character.rawValue,
+            "size": PetSizePreset.from(scale: controller.uiState.floatingScale).rawValue,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8) else { return }
+        let js = "window.dispatchEvent(new CustomEvent('native:petSettings', { detail: \(json) }));"
         webView?.evaluateJavaScript(js, completionHandler: nil)
     }
 
@@ -252,6 +277,29 @@ final class NativeBridge {
             break
         }
         pushSettings()
+    }
+
+    private func applyPetSetting(key: String, value: Any?) {
+        guard let controller = desktopPetController else { return }
+        // No trailing pushPetSettings() here: every mutation path below already pushes
+        // (show/hide/setSize/setCharacter), and their same-value guards only skip the
+        // echo when the dashboard's optimistic state already matches.
+        switch key {
+        case "visible":
+            if let visible = value as? Bool {
+                visible ? controller.show() : controller.hide()
+            }
+        case "character":
+            if let raw = value as? String, let character = PetCharacter(rawValue: raw) {
+                controller.setCharacter(character)
+            }
+        case "size":
+            if let raw = value as? String, let size = PetSizePreset(rawValue: raw) {
+                controller.setSize(size)
+            }
+        default:
+            break
+        }
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {

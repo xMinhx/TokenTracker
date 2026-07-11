@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
+import { petVisualScale } from "../../lib/pet-appearance.js";
+import { normalizePetCharacter } from "../../lib/pet-personality.js";
+import { PetAtlasAnimated } from "./PetAtlasAnimated.jsx";
 
 /**
  * SVG path mapping: state name → file path under /clawd/
@@ -63,7 +66,13 @@ const svgCache = new Map();
 
 async function fetchSvg(path) {
   if (svgCache.has(path)) return svgCache.get(path);
-  const resp = await fetch(`/clawd/${path}`);
+  if (typeof fetch !== "function") return null;
+  let resp;
+  try {
+    resp = await fetch(`/clawd/${path}`);
+  } catch {
+    return null;
+  }
   if (!resp.ok) return null;
   const raw = await resp.text();
   // Strip fixed width/height so SVG scales to container, keep viewBox
@@ -85,7 +94,7 @@ async function fetchSvg(path) {
  * @param {number} size - Display size in pixels
  * @param {string} className - Additional CSS classes
  */
-export function ClawdAnimated({ state = "idle-living", size = 48, className = "" }) {
+function ClawdSvgAnimated({ state = "idle-living", size = 48, className = "" }) {
   const [svgHtml, setSvgHtml] = useState("");
   const containerRef = useRef(null);
   const reducedMotion = useReducedMotion();
@@ -122,6 +131,7 @@ export function ClawdAnimated({ state = "idle-living", size = 48, className = ""
   return (
     <div
       ref={containerRef}
+      aria-hidden="true"
       className={`clawd-animated ${className}`}
       style={{
         width: size,
@@ -136,13 +146,22 @@ export function ClawdAnimated({ state = "idle-living", size = 48, className = ""
   );
 }
 
+export function ClawdAnimated({ state = "idle-living", size = 48, className = "", character = "clawd" }) {
+  const id = normalizePetCharacter(character);
+  if (id !== "clawd") {
+    return <PetAtlasAnimated character={id} state={state} size={size} className={className} />;
+  }
+  return <ClawdSvgAnimated state={state} size={size * petVisualScale(id)} className={className} />;
+}
+
 function useReducedMotion() {
   const [reduced, setReduced] = useState(() => {
-    if (typeof window === "undefined") return false;
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
     return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   });
 
   useEffect(() => {
+    if (typeof window.matchMedia !== "function") return undefined;
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     const handler = (e) => setReduced(e.matches);
     mq.addEventListener("change", handler);

@@ -79,6 +79,7 @@ final class DesktopPetWindowController: NSObject, NSWindowDelegate {
         panel.orderFrontRegardless()
         UserDefaults.standard.set(true, forKey: Self.showDefaultsKey)
         keepActive()
+        NativeBridge.shared.pushPetSettings()
     }
 
     func hide() {
@@ -87,6 +88,7 @@ final class DesktopPetWindowController: NSObject, NSWindowDelegate {
         UserDefaults.standard.set(false, forKey: Self.showDefaultsKey)
         sleepTimer?.invalidate()
         sleepTimer = nil
+        NativeBridge.shared.pushPetSettings()
     }
 
     /// Re-show the pet on launch if it was visible when the app last quit.
@@ -126,6 +128,7 @@ final class DesktopPetWindowController: NSObject, NSWindowDelegate {
                     onHoverChanged: { [weak self] hovering in self?.handleHover(hovering) },
                     onKeepActive: { [weak self] in self?.keepActive() },
                     onSetSize: { [weak self] preset in self?.setSize(preset) },
+                    onSetCharacter: { [weak self] character in self?.setCharacter(character) },
                     petState: uiState
                 )
             )
@@ -402,6 +405,17 @@ final class DesktopPetWindowController: NSObject, NSWindowDelegate {
         } else {
             detectTuckedState(panel)
         }
+        NativeBridge.shared.pushPetSettings()
+    }
+
+    /// Change the visible companion identity without rebuilding the floating window.
+    /// `PetCharacterStore` is the single source of truth — every view observes it
+    /// directly, so no per-window mirror to keep in sync.
+    func setCharacter(_ character: PetCharacter) {
+        guard character != PetCharacterStore.shared.character else { return }
+        PetCharacterStore.shared.setCharacter(character)
+        keepActive()
+        NativeBridge.shared.pushPetSettings()
     }
 
     deinit {
@@ -457,6 +471,50 @@ enum PetSizePreset: String, CaseIterable {
     /// Nearest preset for a given scale (used to check the active item in the menu).
     static func from(scale: CGFloat) -> PetSizePreset {
         allCases.min { abs($0.scale - scale) < abs($1.scale - scale) } ?? .medium
+    }
+}
+
+/// Distinct companion identities share the same state machine. Clawd is drawn by
+/// SwiftUI while the other companions use their own fully illustrated sprite atlases.
+enum PetCharacter: String, CaseIterable {
+    case clawd, sprout, byte, ember
+
+    /// SVG Clawd is tightly cropped; atlas pets carry transparent breathing room.
+    /// Normalize painted size without changing the selected window-size preset.
+    var visualScale: CGFloat {
+        self == .clawd ? 0.84 : 1.0
+    }
+
+    var menuLabel: String {
+        switch self {
+        case .clawd: return Strings.petCharacterClawd
+        case .sprout: return Strings.petCharacterSprout
+        case .byte: return Strings.petCharacterByte
+        case .ember: return Strings.petCharacterEmber
+        }
+    }
+
+}
+
+/// One persisted appearance source shared by the menu-bar popover, floating pet,
+/// and Dashboard native bridge. Keeping this separate from `PetWindowState` avoids
+/// leaking floating-only state (edge tuck, sleep, hover) into the popover.
+@MainActor
+final class PetCharacterStore: ObservableObject {
+    static let shared = PetCharacterStore()
+    private static let defaultsKey = "DesktopPetCharacter"
+
+    @Published private(set) var character: PetCharacter
+
+    private init() {
+        let raw = UserDefaults.standard.string(forKey: Self.defaultsKey)
+        character = raw.flatMap(PetCharacter.init(rawValue:)) ?? .clawd
+    }
+
+    func setCharacter(_ character: PetCharacter) {
+        guard self.character != character else { return }
+        self.character = character
+        UserDefaults.standard.set(character.rawValue, forKey: Self.defaultsKey)
     }
 }
 

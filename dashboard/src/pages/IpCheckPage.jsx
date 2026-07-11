@@ -412,7 +412,7 @@ export default function IpCheckPage() {
         const txt = await r.text();
         const m = txt.match(/ip=([^\n]+)/);
         if (m) state.ip = m[1].trim();
-      } catch {}
+      } catch { /* best-effort IP source */ }
     }
     async function fetchClaudeIP() {
       try {
@@ -428,13 +428,13 @@ export default function IpCheckPage() {
         const html = await r.text();
         const m = html.match(/(\d+\.\d+\.\d+\.\d+)/);
         if (m) return { ip: m[1] };
-      } catch {}
+      } catch { /* try the fallback source below */ }
       try {
         const r = await fetch("https://my.ip.cn/", { signal: AbortSignal.timeout(5000) });
         const html = await r.text();
         const m = html.match(/(\d+\.\d+\.\d+\.\d+)/);
         if (m) return { ip: m[1] };
-      } catch {}
+      } catch { /* no fallback source remains */ }
       return null;
     }
 
@@ -458,7 +458,7 @@ export default function IpCheckPage() {
           ipEl.innerHTML = `${flagImg(cc)} ${linkIP(ip)}`;
           setGeoText(geoId, geo);
         }
-      } catch {}
+      } catch { /* geo lookup is optional */ }
     }
 
     // ─── Render bound to data state ───────────────────────────────────────
@@ -674,7 +674,7 @@ export default function IpCheckPage() {
             dnsServers = data.dns_servers || [];
             if (dnsServers.length > 0) break;
           }
-        } catch {}
+        } catch { /* retry below */ }
         if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
       }
 
@@ -691,7 +691,7 @@ export default function IpCheckPage() {
         try {
           const r = await fetch(`${PROXY}/api/geoip/${ip}`, { signal: AbortSignal.timeout(3000) });
           if (r.ok) geo = await r.json();
-        } catch {}
+        } catch { /* geo enrichment is optional */ }
         const cc = geo?.country_code || "";
         const isp = geo?.isp || "";
         const isCN = cc === "cn";
@@ -736,7 +736,7 @@ export default function IpCheckPage() {
             if (m6) udpIPs.add(m6[0]);
           };
         });
-      } catch {}
+      } catch { /* UDP candidates remain empty */ }
 
       const claudeIp = state.claudeRisk?.ip || "";
       const allUdp = [...udpIPs];
@@ -764,7 +764,7 @@ export default function IpCheckPage() {
       try {
         const r = await fetch(`${PROXY}/api/geoip/${showIP}`, { signal: AbortSignal.timeout(5000) });
         if (r.ok) { const g = await r.json(); showFlag = g.country_code || ""; showCountry = g.country || ""; }
-      } catch {}
+      } catch { /* geo enrichment is optional */ }
       const ipValue = `${flagImg(showFlag)} <span class="${isLeaked ? "text-amber-600 dark:text-amber-400 font-medium" : ""}">${displayIP(showIP)}</span>${matchesClaude ? "" : isLeaked ? " " + tag(t.udpAnomaly, "warn") : ""}`;
       html += row(t.udpOutlet, ipValue);
       if (showCountry) html += row(t.udpOrigin, `<span class="text-xs text-oai-gray-500 dark:text-oai-gray-400 font-normal">${esc(showCountry)}</span>`);
@@ -812,7 +812,7 @@ export default function IpCheckPage() {
           const indVar = { none: "safe", minor: "warn", major: "danger", critical: "danger", maintenance: "warn" };
           html += row(t.availSvc, tag(indText, indVar[ind] || "warn"));
         }
-      } catch {}
+      } catch { /* service status is optional */ }
       el.innerHTML = html;
     }
     root.__detectClaudeAvail = detectClaudeAvail;
@@ -881,7 +881,7 @@ export default function IpCheckPage() {
           const ext = gl.getExtension("WEBGL_debug_renderer_info");
           if (ext) webglRenderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
         }
-      } catch {}
+      } catch { /* WebGL renderer may be unavailable */ }
       let webglHash = t.devUnsupported;
       try {
         const canvas = document.createElement("canvas");
@@ -895,7 +895,7 @@ export default function IpCheckPage() {
           for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
           webglHash = (h >>> 0).toString(16).toUpperCase();
         }
-      } catch {}
+      } catch { /* WebGL fingerprint may be unavailable */ }
       let canvasHash = t.devUnsupported;
       try {
         const canvas = document.createElement("canvas");
@@ -910,7 +910,7 @@ export default function IpCheckPage() {
         let hash = 0;
         for (let i = 0; i < data.length; i++) hash = ((hash << 5) - hash + data.charCodeAt(i)) | 0;
         canvasHash = (hash >>> 0).toString(16).toUpperCase();
-      } catch {}
+      } catch { /* canvas fingerprint may be unavailable */ }
       const isTouch = navigator.maxTouchPoints > 0;
       const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
       const netType = conn ? (conn.effectiveType || conn.type || t.unknown) : t.devNetUnsupported;
@@ -1019,7 +1019,7 @@ export default function IpCheckPage() {
             if (ipAddrEl) ipAddrEl.innerHTML = `${flagImg(cc)} ${linkIP(state.ip)}`;
             setGeoText("ipGeo", state.cfGeo);
           }
-        } catch {}
+        } catch { /* Cloudflare geo is optional */ }
       })());
 
       tasks.push((async () => {
@@ -1048,7 +1048,7 @@ export default function IpCheckPage() {
               setGeoText("ipGeoClaude", geo);
               geoOk = true;
             }
-          } catch {}
+          } catch { /* local geo fallback runs below */ }
         }
         if (!geoOk && claude.loc) {
           if (ipAddrEl) ipAddrEl.innerHTML = `${flagImg(claude.loc)} ${linkIP(claudeIp)}`;

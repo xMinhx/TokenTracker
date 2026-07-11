@@ -20,8 +20,12 @@ struct ClawdCompanionView: View {
     var onKeepActive: (() -> Void)? = nil
     /// Floating pet: change the pet size preset (from the right-click menu).
     var onSetSize: ((PetSizePreset) -> Void)? = nil
+    /// Floating pet: switch the persistent companion identity.
+    var onSetCharacter: ((PetCharacter) -> Void)? = nil
     /// Floating pet: gates the bubble by on-screen width (set by DesktopPetWindowController).
     @ObservedObject var petState: PetWindowState = .alwaysAllowed
+    /// Appearance is shared with the floating pet so the popover changes immediately.
+    @ObservedObject private var characterStore = PetCharacterStore.shared
 
     /// Floating pet: briefly reveal the quip bubble after a tap (hover shows data instead).
     @State private var floatingBubbleShown = false
@@ -182,6 +186,19 @@ struct ClawdCompanionView: View {
                             }
                         }
                     }
+                    Menu(Strings.menuPetCharacter) {
+                        ForEach(PetCharacter.allCases, id: \.self) { character in
+                            Button {
+                                onSetCharacter?(character)
+                            } label: {
+                                if character == characterStore.character {
+                                    Label(character.menuLabel, systemImage: "checkmark")
+                                } else {
+                                    Text(character.menuLabel)
+                                }
+                            }
+                        }
+                    }
                     Divider()
                     Button(Strings.menuHidePet) { onClosePet?() }
                 }
@@ -309,6 +326,7 @@ struct ClawdCompanionView: View {
         let yOff: CGFloat
         let size: CGSize
         let bodyColor: Color
+        let accentColor: Color
         let eyeColor: Color
         let eyesClosed: Bool
         let hoverLeanX: CGFloat
@@ -326,6 +344,25 @@ struct ClawdCompanionView: View {
     }
 
     private var characterView: some View {
+        Group {
+            if activeCharacter == .clawd {
+                clawdCanvas
+            } else {
+                PetAtlasSpriteView(
+                    character: activeCharacter,
+                    state: clawdState,
+                    isVisible: layout != .floating || petState.isWindowVisible
+                )
+            }
+        }
+        .scaleEffect(activeCharacter.visualScale)
+    }
+
+    private var activeCharacter: PetCharacter {
+        characterStore.character
+    }
+
+    private var clawdCanvas: some View {
         TimelineView(.animation(
             minimumInterval: characterFrameInterval,
             paused: characterTimelinePaused
@@ -340,6 +377,7 @@ struct ClawdCompanionView: View {
                     yOff: (size.height - 10 * s) / 2,
                     size: size,
                     bodyColor: Color(red: 0.87, green: 0.53, blue: 0.43),
+                    accentColor: Color(red: 1.0, green: 0.82, blue: 0.40),
                     eyeColor: Color.black,
                     eyesClosed: eyesClosed,
                     hoverLeanX: hoverLeanX,
@@ -357,6 +395,10 @@ struct ClawdCompanionView: View {
                 case .workingTyping:   Self.drawWorkingTyping(ctx: ctx, context: &context)
                 case .workingThinking: Self.drawWorkingThinking(ctx: ctx, context: &context)
                 case .workingUltrathink: Self.drawWorkingUltrathink(ctx: ctx, context: &context)
+                case .workingJuggling: Self.drawWorkingJuggling(ctx: ctx, context: &context)
+                case .workingWizard:   Self.drawWorkingWizard(ctx: ctx, context: &context)
+                case .workingOverheated: Self.drawWorkingOverheated(ctx: ctx, context: &context)
+                case .happy:           Self.drawHappy(ctx: ctx, context: &context)
                 case .disconnected:    Self.drawDisconnected(ctx: ctx, context: &context)
                 case .error:           Self.drawError(ctx: ctx, context: &context)
                 case .yawning:         Self.drawYawning(ctx: ctx, context: &context)
@@ -380,7 +422,8 @@ struct ClawdCompanionView: View {
 
     private var characterFrameInterval: TimeInterval {
         switch clawdState {
-        case .workingTyping, .workingThinking, .workingUltrathink, .error, .yawning, .waking:
+        case .workingTyping, .workingThinking, .workingUltrathink, .workingJuggling,
+             .workingWizard, .workingOverheated, .happy, .error, .yawning, .waking:
             return 1.0 / 15.0
         case .disconnected, .miniAlert, .miniPeek, .miniHappy:
             return 1.0 / 5.0
@@ -409,6 +452,7 @@ struct ClawdCompanionView: View {
                         yOff: (size.height - 10 * s) / 2,
                         size: size,
                         bodyColor: Color(red: 0.87, green: 0.53, blue: 0.43),
+                        accentColor: Color(red: 1.0, green: 0.82, blue: 0.40),
                         eyeColor: Color.black,
                         eyesClosed: false,
                         hoverLeanX: 0,
@@ -758,6 +802,56 @@ struct ClawdCompanionView: View {
         }
     }
 
+    private static func drawWorkingJuggling(ctx: DrawCtx, context: inout GraphicsContext) {
+        let t = ctx.t
+        let bounce = -abs(sin(t * 3.2)) * 0.5
+        drawBaseCharacterStatic(ctx: ctx, context: &context, dx: 0, dy: bounce, eyeShift: 0, breathPhase: 0)
+
+        let colors: [Color] = [.red, ctx.accentColor, .green]
+        for index in 0..<3 {
+            let phase = t * 2.4 + Double(index) * (2 * .pi / 3)
+            let x = 7.0 + CGFloat(cos(phase)) * 5.0
+            let y = 4.0 + CGFloat(sin(phase)) * 2.5
+            context.fill(Path(ctx.r(x, y, 1.2, 1.2)), with: .color(colors[index]))
+        }
+    }
+
+    private static func drawWorkingWizard(ctx: DrawCtx, context: inout GraphicsContext) {
+        let t = ctx.t
+        drawBaseCharacterStatic(ctx: ctx, context: &context, dx: 0, dy: 0, eyeShift: 0, breathPhase: CGFloat(sin(t * 2)) * 0.2)
+
+        let hat = Color(red: 0.25, green: 0.19, blue: 0.55)
+        context.fill(Path(ctx.r(3, 5, 9, 1)), with: .color(hat))
+        context.fill(Path(ctx.r(5, 3, 5, 2)), with: .color(hat))
+        context.fill(Path(ctx.r(7, 1, 2, 2)), with: .color(hat))
+        context.fill(Path(ctx.r(13, 7, 1, 5)), with: .color(.brown))
+
+        let sparkle = 0.35 + 0.65 * abs(sin(t * 4))
+        context.fill(Path(ctx.r(12, 5, 1.2, 1.2)), with: .color(ctx.accentColor.opacity(sparkle)))
+    }
+
+    private static func drawWorkingOverheated(ctx: DrawCtx, context: inout GraphicsContext) {
+        drawError(ctx: ctx, context: &context)
+        let pulse = 0.35 + abs(sin(ctx.t * 5)) * 0.45
+        context.fill(Path(ctx.r(2, 11, 11, 3)), with: .color(.red.opacity(pulse * 0.18)))
+    }
+
+    private static func drawHappy(ctx: DrawCtx, context: inout GraphicsContext) {
+        let bounce = -abs(sin(ctx.t * 5)) * 1.5
+        drawBaseCharacterStatic(ctx: ctx, context: &context, dx: 0, dy: bounce, eyeShift: 0, breathPhase: 0)
+
+        // Replace the open eyes with compact smiling eyes.
+        context.fill(Path(ctx.r(3.5, 7.5, 2, 3, dy: bounce)), with: .color(ctx.bodyColor))
+        context.fill(Path(ctx.r(9.5, 7.5, 2, 3, dy: bounce)), with: .color(ctx.bodyColor))
+        context.fill(Path(ctx.r(3.5, 9, 2, 0.5, dy: bounce)), with: .color(ctx.eyeColor))
+        context.fill(Path(ctx.r(9.5, 9, 2, 0.5, dy: bounce)), with: .color(ctx.eyeColor))
+        context.fill(Path(ctx.r(7, 11, 1.5, 0.7, dy: bounce)), with: .color(ctx.eyeColor))
+
+        let sparkle = 0.3 + abs(sin(ctx.t * 6)) * 0.7
+        context.fill(Path(ctx.r(1, 5, 1, 1)), with: .color(ctx.accentColor.opacity(sparkle)))
+        context.fill(Path(ctx.r(13, 4, 1, 1)), with: .color(ctx.accentColor.opacity(1 - sparkle * 0.5)))
+    }
+
     private static func drawDisconnected(ctx: DrawCtx, context: inout GraphicsContext) {
         let t = ctx.t, s = ctx.s, yBase = ctx.yBase, yOff = ctx.yOff
         let bodyColor = ctx.bodyColor, eyeColor = ctx.eyeColor
@@ -1006,6 +1100,10 @@ struct ClawdCompanionView: View {
         case workingTyping
         case workingThinking
         case workingUltrathink
+        case workingJuggling
+        case workingWizard
+        case workingOverheated
+        case happy
         case disconnected
         case error
         case yawning
@@ -1028,13 +1126,16 @@ struct ClawdCompanionView: View {
             if !viewModel.serverOnline { return .disconnected }
             if viewModel.error != nil { return .error }
             if viewModel.isSyncing { return .workingTyping }
+            if modelStatusText != nil { return .happy }
+            if viewModel.isLoading { return .workingThinking }
             if viewModel.todayTokens == 0 { return .sleeping }
             return idleVariant
         }()
 
         // 1.5. Idle-timer sleep/wake override — but never mask an active
         //      working/error/disconnected state (the pet shouldn't doze mid-sync).
-        let isBusy = rawState == .workingTyping || rawState == .disconnected || rawState == .error
+        let isBusy = rawState == .workingTyping || rawState == .happy ||
+            rawState == .disconnected || rawState == .error
         if let sleepState = petState.sleepState, !isBusy {
             if petState.isTucked {
                 if sleepState == .sleeping || sleepState == .yawning {
@@ -1052,11 +1153,19 @@ struct ClawdCompanionView: View {
             if rawState == .disconnected || rawState == .error {
                 return .miniAlert
             }
+            if rawState == .happy {
+                return .miniHappy
+            }
             if petState.isHovered {
                 return .miniPeek
             }
             if rawState == .sleeping {
                 return .miniSleep
+            }
+            if rawState == .workingTyping || rawState == .workingThinking ||
+                rawState == .workingUltrathink || rawState == .workingJuggling ||
+                rawState == .workingWizard || rawState == .workingOverheated {
+                return .miniPeek
             }
             return .miniIdle
         }
@@ -1251,6 +1360,10 @@ struct ClawdCompanionView: View {
 
     /// All the fun states to show temporarily on tap
     private static let tapAnimations: [ClawdState] = [
+        .happy,             // 用量增长后的庆祝
+        .workingWizard,     // 连续活跃
+        .workingJuggling,   // 多模型并行
+        .workingThinking,   // 加载/思考
         .workingUltrathink,  // 超级思考 (震颤+火花+彩虹)
         .workingTyping,      // 打字 (抖动+数据粒子)
         .disconnected,       // 找东西 (问号/感叹号)
@@ -1318,7 +1431,15 @@ struct ClawdCompanionView: View {
     private func startIdleVariantLoop() {
         let delay = Double.random(in: 12...25)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            let variants: [ClawdState] = [.idleLiving, .idleLook, .idleLiving, .idleLiving, .idleLook]
+            var variants: [ClawdState] = [.idleLiving, .idleLook, .idleLiving, .idleLiving]
+            let tokens = viewModel.todayTokens
+            if tokens >= 200_000 { variants.append(.workingThinking) }
+            if tokens >= 500_000 { variants.append(.workingJuggling) }
+            // .workingOverheated is deliberately excluded: it draws the error visuals
+            // (X-eyes + red pulse), which must stay reserved for a real error state.
+            if tokens >= 2_000_000 { variants.append(.workingUltrathink) }
+            if viewModel.topModels.count >= 3 { variants.append(.workingJuggling) }
+            if (viewModel.heatmap?.streakDays ?? 0) >= 7 { variants.append(.workingWizard) }
             idleVariant = variants.randomElement() ?? .idleLiving
             startIdleVariantLoop()
         }

@@ -252,7 +252,7 @@ describe("UsageLimitsPanel", () => {
           configured: true,
           error: null,
           credit_window: {
-            used_percent: 0.13609159692128498,
+            used_percent: 0.136091596921285,
             remaining_percent: 99.86390840307871,
             reset_at: 1_785_542_400,
             limit_credits: 37_500,

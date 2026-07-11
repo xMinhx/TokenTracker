@@ -25,6 +25,7 @@ index.scip
 
 # Local-only
 /tasks/
+/tmp/
 .vercel
 
 # TokenTrackerBar build artifacts

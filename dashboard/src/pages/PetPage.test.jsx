@@ -1,0 +1,111 @@
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { copy } from "../lib/copy";
+import { PetPage } from "./PetPage.jsx";
+
+vi.mock("../ui/foundation/ClawdAnimated.jsx", () => ({
+  ClawdAnimated: ({ state, character }) => <div data-state={state} data-character={character} />,
+}));
+
+vi.mock("../ui/foundation/FadeIn.jsx", () => ({
+  FadeIn: ({ children }) => <>{children}</>,
+}));
+
+function installNativeBridge() {
+  const messages = [];
+  window.history.pushState({}, "", "/pet-settings?app=1");
+  window.webkit = {
+    messageHandlers: {
+      nativeBridge: { postMessage: (message) => messages.push(message) },
+    },
+  };
+  return messages;
+}
+
+function installWindowsBridge() {
+  const messages = [];
+  window.history.pushState({}, "", "/pet-settings?app=1");
+  window.chrome = {
+    webview: { postMessage: (message) => messages.push(JSON.parse(message)) },
+  };
+  return messages;
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  window.history.pushState({}, "", "/");
+  window.localStorage.removeItem("tokentracker_native_app");
+  delete window.webkit;
+  delete window.chrome;
+});
+
+describe("PetPage", () => {
+  it("uses the page title without the redundant desktop companion eyebrow", () => {
+    render(<PetPage />);
+
+    expect(screen.getByRole("heading", { name: copy("pet.page.title") })).toBeInTheDocument();
+    expect(screen.queryByText(copy("pet.page.eyebrow"))).not.toBeInTheDocument();
+    const selectedClawd = screen.getByRole("button", { name: new RegExp(copy("pet.character.clawd")) });
+    expect(selectedClawd).toHaveClass("border-oai-brand-500/40");
+    expect(selectedClawd).not.toHaveClass("border-oai-black", "dark:border-white");
+  });
+
+  it("reads and updates live desktop pet settings through the native bridge", async () => {
+    const user = userEvent.setup();
+    const messages = installNativeBridge();
+    render(<PetPage />);
+
+    expect(messages).toContainEqual({ type: "getPetSettings" });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("native:petSettings", {
+        detail: { visible: true, character: "sprout", size: "large" },
+      }));
+    });
+
+    expect(await screen.findByRole("switch", { name: copy("pet.controls.show") })).toBeChecked();
+    expect(screen.getByRole("button", { name: new RegExp(copy("pet.character.sprout")) })).toHaveAttribute("aria-pressed", "true");
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: new RegExp(copy("pet.character.byte")) }));
+    });
+    await waitFor(() => {
+      expect(messages).toContainEqual({ type: "setPetSetting", key: "character", value: "byte" });
+    });
+  });
+
+  it("lets browser users preview every data state without a native host", async () => {
+    const user = userEvent.setup();
+    render(<PetPage />);
+    const focus = screen.getByRole("button", { name: copy("pet.state.focus") });
+    await act(async () => {
+      await user.click(focus);
+    });
+    expect(focus).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(copy("pet.controls.native_only"))).toBeInTheDocument();
+  });
+
+  it("uses the WebView2 JSON bridge for Windows pet settings", async () => {
+    const user = userEvent.setup();
+    const messages = installWindowsBridge();
+    render(<PetPage />);
+
+    expect(messages).toContainEqual({ type: "getPetSettings" });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("native:petSettings", {
+        detail: { visible: false, character: "ember", size: "small" },
+      }));
+    });
+
+    const ember = await screen.findByRole("button", {
+      name: new RegExp(copy("pet.character.ember")),
+    });
+    expect(ember).toHaveAttribute("aria-pressed", "true");
+    await act(async () => {
+      await user.click(screen.getByRole("button", {
+        name: new RegExp(copy("pet.character.sprout")),
+      }));
+    });
+    expect(messages).toContainEqual({ type: "setPetSetting", key: "character", value: "sprout" });
+  });
+});

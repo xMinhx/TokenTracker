@@ -42,3 +42,10 @@ test("App.jsx keeps menu bar configuration inside /widgets", () => {
   assert.equal(source.includes('"/menubar"'), false, "/menubar should not be a separate route");
   assert.equal(source.includes("MenuBarPage"), false, "MenuBarPage should not be referenced");
 });
+
+test("App.jsx routes to the desktop pet settings page", () => {
+  const appPath = path.join(repoRoot, "dashboard/src/App.jsx");
+  const source = fs.readFileSync(appPath, "utf8");
+  assert.equal(source.includes('"/pet-settings"'), true, "/pet-settings route should exist");
+  assert.equal(source.includes("PetPage"), true, "PetPage should be lazy-loaded and referenced");
+});

@@ -138,3 +138,44 @@ export function onNativeSettings(handler) {
   window.addEventListener("native:settings", listener);
   return () => window.removeEventListener("native:settings", listener);
 }
+
+/** Desktop-pet settings are supported by both the macOS and Windows native hosts. */
+export function isPetBridgeAvailable() {
+  if (typeof window === "undefined") return false;
+  return Boolean(window.webkit?.messageHandlers?.nativeBridge || window.chrome?.webview);
+}
+
+function postPetMessage(message) {
+  if (typeof window === "undefined") return false;
+  const macHandler = window.webkit?.messageHandlers?.nativeBridge;
+  if (macHandler) {
+    try {
+      macHandler.postMessage(message);
+      return true;
+    } catch { return false; }
+  }
+  if (window.chrome?.webview) {
+    try {
+      window.chrome.webview.postMessage(JSON.stringify(message));
+      return true;
+    } catch { return false; }
+  }
+  return false;
+}
+
+export function requestNativePetSettings() {
+  return postPetMessage({ type: "getPetSettings" });
+}
+
+export function setNativePetSetting(key, value) {
+  return postPetMessage({ type: "setPetSetting", key, value });
+}
+
+export function onNativePetSettings(handler) {
+  if (typeof window === "undefined") return () => {};
+  const listener = (event) => {
+    if (event?.detail && typeof event.detail === "object") handler(event.detail);
+  };
+  window.addEventListener("native:petSettings", listener);
+  return () => window.removeEventListener("native:petSettings", listener);
+}

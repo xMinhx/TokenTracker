@@ -196,6 +196,11 @@ enum Strings {
     static var menuDesktopPet: String { t("Desktop Pet", "桌面宠物", "桌面寵物", "デスクトップペット", "데스크톱 펫") }
     static var menuHidePet: String { t("Hide Pet", "隐藏桌宠", "隱藏桌寵", "ペットを隠す", "펫 숨기기") }
     static var menuPetSize: String { t("Pet Size", "桌宠大小", "桌寵大小", "ペットのサイズ", "펫 크기") }
+    static var menuPetCharacter: String { t("Pet Character", "宠物形象", "寵物形象", "ペットのキャラクター", "펫 캐릭터") }
+    static var petCharacterClawd: String { "Clawd" }
+    static var petCharacterSprout: String { "Sprout" }
+    static var petCharacterByte: String { "Byte" }
+    static var petCharacterEmber: String { "Ember" }
     static var petSizeSmall: String { t("Small", "小", "小", "小", "작게") }
     static var petSizeMedium: String { t("Medium", "中", "中", "中", "보통") }
     static var petSizeLarge: String { t("Large", "大", "大", "大", "크게") }

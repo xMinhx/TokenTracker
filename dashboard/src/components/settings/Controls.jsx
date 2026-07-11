@@ -63,7 +63,7 @@ export function SectionCard({ title, subtitle, action, children }) {
   );
 }
 
-export function SegmentedControl({ options, value, onChange }) {
+export function SegmentedControl({ options, value, onChange, disabled = false }) {
   return (
     <div className="inline-flex items-center rounded-lg border border-oai-gray-200 bg-oai-gray-50 p-0.5 dark:border-oai-gray-800 dark:bg-oai-gray-900">
       {options.map(({ value: optionValue, label, Icon }) => {
@@ -74,8 +74,9 @@ export function SegmentedControl({ options, value, onChange }) {
             type="button"
             onClick={() => onChange(optionValue)}
             aria-pressed={active}
+            disabled={disabled}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
               active
                 ? "bg-white text-oai-black shadow-sm dark:bg-oai-gray-800 dark:text-white"
                 : "text-oai-gray-500 hover:text-oai-black dark:text-oai-gray-400 dark:hover:text-white",

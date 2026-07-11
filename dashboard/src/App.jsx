@@ -66,6 +66,9 @@ const SkillsPage = lazy(() =>
 const WidgetsPage = lazy(() =>
   import("./pages/WidgetsPage.jsx").then((m) => ({ default: m.WidgetsPage })),
 );
+const PetPage = lazy(() =>
+  import("./pages/PetPage.jsx").then((m) => ({ default: m.PetPage })),
+);
 
 export default function App() {
   // Subscribing to locale here makes App rerender on language switch, which
@@ -185,8 +188,9 @@ export default function App() {
   const isSettingsPath = normalizedPath === "/settings";
   const isSkillsPath = normalizedPath === "/skills";
   const isWidgetsPath = normalizedPath === "/widgets";
+  const isPetPath = normalizedPath === "/pet-settings";
   const isIpCheckPath = normalizedPath === "/ip-check";
-  if (isLimitsPath || isSettingsPath || isSkillsPath || isWidgetsPath || isIpCheckPath) gate = "dashboard";
+  if (isLimitsPath || isSettingsPath || isSkillsPath || isWidgetsPath || isPetPath || isIpCheckPath) gate = "dashboard";
 
   let PageComponent = DashboardPage;
   if (profileUserId) {
@@ -201,6 +205,8 @@ export default function App() {
     PageComponent = SkillsPage;
   } else if (isWidgetsPath) {
     PageComponent = WidgetsPage;
+  } else if (isPetPath) {
+    PageComponent = PetPage;
   } else if (isIpCheckPath) {
     PageComponent = IpCheckPage;
   }
@@ -215,6 +221,7 @@ export default function App() {
       isSettingsPath ||
       isSkillsPath ||
       isWidgetsPath ||
+      isPetPath ||
       isIpCheckPath);
 
   // Public-host gating: on www.tokentracker.cc et al. there is no local
