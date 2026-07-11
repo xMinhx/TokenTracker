@@ -5275,6 +5275,45 @@ test("parseCopilotIncremental aggregates chat spans and subtracts cache from inp
   }
 });
 
+test("parseCopilotIncremental normalizes CLI cache writes, reasoning, and dotted models", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
+  try {
+    const otelPath = path.join(tmp, "copilot-otel-cli.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    writeCopilotOtelFile(otelPath, [
+      makeCopilotChatSpan({
+        traceId: "t-cli-semantics",
+        spanId: "s-cli-semantics",
+        inputTokens: 125,
+        outputTokens: 7,
+        cacheRead: 20,
+        cacheWrite: 100,
+        reasoning: 3,
+        model: "claude-opus-4.8",
+      }),
+    ]);
+
+    const result = await parseCopilotIncremental({
+      otelPaths: [otelPath],
+      cursors: {},
+      queuePath,
+    });
+    assert.equal(result.eventsAggregated, 1);
+    const [row] = (await readJsonLines(queuePath)).filter(
+      (entry) => entry.source === "copilot",
+    );
+    assert.equal(row.model, "claude-opus-4-8");
+    assert.equal(row.input_tokens, 5);
+    assert.equal(row.cached_input_tokens, 20);
+    assert.equal(row.cache_creation_input_tokens, 100);
+    assert.equal(row.output_tokens, 4);
+    assert.equal(row.reasoning_output_tokens, 3);
+    assert.equal(row.total_tokens, 132);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseCopilotIncremental dedups by traceId:spanId across runs", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
   try {
@@ -5428,9 +5467,9 @@ test("parseCopilotIncremental reads short cache_creation + reasoning_tokens keys
     assert.equal(b.input_tokens, 3500);
     assert.equal(b.cached_input_tokens, 1500);
     assert.equal(b.cache_creation_input_tokens, 800);
-    assert.equal(b.output_tokens, 300);
+    assert.equal(b.output_tokens, 50);
     assert.equal(b.reasoning_output_tokens, 250);
-    assert.equal(b.total_tokens, 3500 + 1500 + 800 + 300 + 250);
+    assert.equal(b.total_tokens, 3500 + 1500 + 800 + 50 + 250);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -5465,9 +5504,9 @@ test("parseCopilotIncremental reads flat cached/reasoning usage keys from Copilo
     assert.ok(b, "copilot bucket present");
     assert.equal(b.input_tokens, 71_163);
     assert.equal(b.cached_input_tokens, 1_517_440);
-    assert.equal(b.output_tokens, 15_768);
+    assert.equal(b.output_tokens, 6_467);
     assert.equal(b.reasoning_output_tokens, 9_301);
-    assert.equal(b.total_tokens, 1_613_672);
+    assert.equal(b.total_tokens, 1_604_371);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

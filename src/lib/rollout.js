@@ -9443,10 +9443,28 @@ async function parseCopilotIncremental({ otelPaths, cursors, queuePath, onProgre
           attrs["gen_ai.usage.reasoning_tokens"] ??
           attrs["gen_ai.usage.reasoning_output_tokens"],
       );
-      // OTEL input_tokens INCLUDES cache_read — subtract per project convention
+      const reasoningClamped = Math.min(reasoning, output);
+      const outputWithoutReasoning = Math.max(0, output - reasoningClamped);
+      const cliSpan = isCopilotV1ChatSpan(record);
+      // CLI input includes both cache reads and writes. Chat-extension
+      // LogRecords expose cache creation separately, so preserve their existing
+      // input-minus-read semantics.
       const cacheReadClamped = Math.min(cacheRead, inputRaw);
-      const input = Math.max(0, inputRaw - cacheReadClamped);
-      const totalInteresting = input + output + cacheReadClamped + cacheWrite + reasoning;
+      const cacheWriteClamped = Math.min(
+        cacheWrite,
+        Math.max(0, inputRaw - cacheReadClamped),
+      );
+      const cacheWriteForAccounting = cliSpan ? cacheWriteClamped : cacheWrite;
+      const input = Math.max(
+        0,
+        inputRaw - cacheReadClamped - (cliSpan ? cacheWriteClamped : 0),
+      );
+      const totalInteresting =
+        input +
+        outputWithoutReasoning +
+        cacheReadClamped +
+        cacheWriteForAccounting +
+        reasoningClamped;
       if (totalInteresting === 0) continue;
 
       // CLI Span uses endTime/startTime; Chat extension LogRecord uses hrTime/hrTimeObserved.
@@ -9460,15 +9478,22 @@ async function parseCopilotIncremental({ otelPaths, cursors, queuePath, onProgre
       const bucketStart = toUtcHalfHourStart(tsIso);
       if (!bucketStart) continue;
 
-      const model = normalizeModelInput(pickCopilotModel(attrs)) || "github-copilot";
+      const model =
+        normalizeCopilotAppModel(pickCopilotModel(attrs)) ||
+        COPILOT_APP_DEFAULT_MODEL;
 
       const delta = {
         input_tokens: input,
         cached_input_tokens: cacheReadClamped,
-        cache_creation_input_tokens: cacheWrite,
-        output_tokens: output,
-        reasoning_output_tokens: reasoning,
-        total_tokens: input + output + cacheReadClamped + cacheWrite + reasoning,
+        cache_creation_input_tokens: cacheWriteForAccounting,
+        output_tokens: outputWithoutReasoning,
+        reasoning_output_tokens: reasoningClamped,
+        total_tokens:
+          input +
+          outputWithoutReasoning +
+          cacheReadClamped +
+          cacheWriteForAccounting +
+          reasoningClamped,
         conversation_count: 1,
       };
 
@@ -9735,8 +9760,13 @@ function normalizeCopilotAppTokenDelta(curr, prev) {
   const cachedDelta = Math.max(0, Number(curr?.cached || 0) - Number(prev?.cached || 0));
   const cachedInputTokens = Math.min(cachedDelta, inputDelta);
   const inputTokens = Math.max(0, inputDelta - cachedInputTokens);
-  const outputTokens = Math.max(0, Number(curr?.output || 0) - Number(prev?.output || 0));
-  const reasoningTokens = Math.max(0, Number(curr?.reasoning || 0) - Number(prev?.reasoning || 0));
+  const outputDelta = Math.max(0, Number(curr?.output || 0) - Number(prev?.output || 0));
+  const reasoningDelta = Math.max(
+    0,
+    Number(curr?.reasoning || 0) - Number(prev?.reasoning || 0),
+  );
+  const reasoningTokens = Math.min(reasoningDelta, outputDelta);
+  const outputTokens = Math.max(0, outputDelta - reasoningTokens);
   const totalTokens = inputTokens + cachedInputTokens + outputTokens + reasoningTokens;
   return {
     input_tokens: inputTokens,
