@@ -278,6 +278,9 @@ Konfiguriere dieses Verhalten über die Umgebungsvariable `TOKENTRACKER_WSL_MODE
 * `wsl-only`: Liest ausschließlich die Daten aus der WSL-Umgebung.
 * `native-only`: Liest ausschließlich die Daten aus der nativen Windows-Umgebung.
 
+> [!NOTE]
+> **Präferenz (`-first`) vs. Isolierung (`-only`):** Präferenzmodi bevorzugen deine Auswahl, weichen aber automatisch auf die andere Umgebung aus, falls das Tool dort fehlt. Isolierungsmodi beschränken den Scan strikt auf eine Umgebung und ignorieren die andere komplett.
+
 Diese Tools werden für die WSL-Erkennung unterstützt:
 * **Dateibasiert (Logs & Transkripte):** Every Code, Kimi (legacy & Code), Gemini CLI, Antigravity, OpenCode, Codex CLI, CodeBuddy, WorkBuddy, oh-my-pi, pi, Grok Build, GitHub Copilot, Roo Code, Craft, Kilo Code.
 * **Datenbankbasiert (SQLite):** Hermes, Zed Agent, Goose, Droid, Kilo CLI, Mimo Code, ZCode.

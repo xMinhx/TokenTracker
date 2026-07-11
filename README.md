@@ -284,6 +284,9 @@ Configure this behavior using the `TOKENTRACKER_WSL_MODE` environment variable:
 * `wsl-only`: Scans WSL environment only.
 * `native-only`: Scans native Windows environment only.
 
+> [!NOTE]
+> **Preference (`-first`) vs. Isolation (`-only`):** Preference modes prioritize your choice but gracefully fall back to scanning the other environment if the tool is missing. Isolation modes strictly lock scanning to that single environment and ignore the other completely.
+
 Supported providers for WSL auto-discovery:
 * **File-list & Active CLIs:** Every Code, Kimi (legacy & Code), Gemini CLI, Antigravity, OpenCode, Codex CLI, CodeBuddy, WorkBuddy, oh-my-pi, pi, Grok Build, GitHub Copilot, Roo Code, Craft, Kilo Code.
 * **SQLite-based DBs:** Hermes, Zed Agent, Goose, Droid, Kilo CLI, Mimo Code, ZCode.
