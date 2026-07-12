@@ -16,6 +16,7 @@ function resolveInstallPaths({ nativeValue, wslDir, wslValue } = {}, env = proce
 }
 
 function pathExists(p, existsSync) {
+  if (typeof p !== "string" || !p) return null;
   try { return (existsSync || fssync.existsSync)(p) ? p : null; } catch (_e) { return null; }
 }
 
