@@ -337,6 +337,34 @@ async function cmdStatus(argv = []) {
   const geminiActive = formatResolvedPaths(geminiPaths);
   const geminiInstalledStatus = geminiActive.length > 0;
 
+  // Gemini CLI (passive sessions scan)
+  const geminiCliActive = formatResolvedPaths(geminiPaths, "tmp");
+  const geminiCliInstalled = geminiCliActive.length > 0;
+
+  // Antigravity (passive brains scan)
+  const antigravityActive = [];
+  if (geminiPaths.native) {
+    const dirs = [
+      path.join(geminiPaths.native, "antigravity", "brain"),
+      path.join(geminiPaths.native, "antigravity-ide", "brain"),
+      path.join(geminiPaths.native, "antigravity-cli", "brain"),
+    ];
+    if (dirs.some(d => { try { return fssync.existsSync(d); } catch (_) { return false; } })) {
+      antigravityActive.push(`native: ${geminiPaths.native}`);
+    }
+  }
+  if (geminiPaths.wsl) {
+    const dirs = [
+      path.join(geminiPaths.wsl, "antigravity", "brain"),
+      path.join(geminiPaths.wsl, "antigravity-ide", "brain"),
+      path.join(geminiPaths.wsl, "antigravity-cli", "brain"),
+    ];
+    if (dirs.some(d => { try { return fssync.existsSync(d); } catch (_) { return false; } })) {
+      antigravityActive.push(`WSL: ${geminiPaths.wsl}`);
+    }
+  }
+  const antigravityInstalled = antigravityActive.length > 0;
+
   // Codex CLI (passive sessions scan)
   const codexPaths = resolveInstallPaths({
     nativeValue: process.env.CODEX_HOME || path.join(home, ".codex"),
@@ -620,7 +648,13 @@ async function cmdStatus(argv = []) {
       codeInstalled
         ? `- Every Code: sessions found (${codeActive.join(" | ")})`
         : null,
-      geminiInstalledStatus
+      geminiCliInstalled
+        ? `- Gemini CLI: sessions found (${geminiCliActive.join(" | ")})`
+        : null,
+      antigravityInstalled
+        ? `- Antigravity: brain found (${antigravityActive.join(" | ")})`
+        : null,
+      (!geminiCliInstalled && !antigravityInstalled && geminiInstalledStatus)
         ? `- Gemini CLI / Antigravity: home found (${geminiActive.join(" | ")})`
         : null,
       codexInstalledStatus
