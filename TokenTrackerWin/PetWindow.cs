@@ -254,11 +254,20 @@ internal sealed class PetWindow : Window
             {
                 case "pet:drag":
                     // Hand the press off to the OS so the borderless window moves natively.
+                    // finally guarantees _isDragging resets even if the modal move loop
+                    // throws; a stuck true would permanently disable hover/click-through
+                    // ticks and placement saves.
                     _isDragging = true;
-                    StopEdgeAnimation();
-                    ReleaseCapture();
-                    SendMessage(_hwnd, WM_NCLBUTTONDOWN, (nint)HTCAPTION, nint.Zero);
-                    _isDragging = false;
+                    try
+                    {
+                        StopEdgeAnimation();
+                        ReleaseCapture();
+                        SendMessage(_hwnd, WM_NCLBUTTONDOWN, (nint)HTCAPTION, nint.Zero);
+                    }
+                    finally
+                    {
+                        _isDragging = false;
+                    }
                     // Settle placement synchronously, right here on the UI thread, before
                     // any DispatcherTimer tick can run. Deferring to the 500ms _saveTimer
                     // would let HoverTick fire first while _miniMode is still true; its
