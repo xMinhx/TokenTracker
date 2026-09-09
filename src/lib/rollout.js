@@ -19587,7 +19587,9 @@ async function parseAntigravityFile({
 
     if (!isNewEvent) {
       if (parsed.type === "PLANNER_RESPONSE") {
-        if (dbContextTokens > 0) {
+        if (dbTurn?.hasUsageMetadata) {
+          contextTokens = (dbTurn.uncachedInput || 0) + (dbTurn.cachedInput || 0);
+        } else if (dbContextTokens > 0) {
           contextTokens = dbContextTokens;
         }
         previousContextTokens = contextTokens;
@@ -19619,28 +19621,51 @@ async function parseAntigravityFile({
     let billedPlanner = false;
 
     if (parsed.type === "PLANNER_RESPONSE") {
-      const content = typeof parsed.content === "string" ? parsed.content : "";
-      const thinking = typeof parsed.thinking === "string" ? parsed.thinking : "";
+      if (dbTurn?.hasUsageMetadata) {
+        const uncached = dbTurn.uncachedInput || 0;
+        const cached = dbTurn.cachedInput || 0;
+        const reasoning = dbTurn.reasoningOutput || 0;
+        let output = 0;
+        if (Number.isFinite(dbTurn.textOutput) && dbTurn.textOutput > 0) {
+          output = dbTurn.textOutput;
+        } else if (Number.isFinite(dbTurn.outputTokens)) {
+          output = Math.max(0, dbTurn.outputTokens - reasoning);
+        }
 
-      if (dbContextTokens > 0) {
-        contextTokens = dbContextTokens;
+        delta.input_tokens = uncached;
+        delta.cached_input_tokens = cached;
+        delta.output_tokens = output;
+        delta.reasoning_output_tokens = reasoning;
+        delta.total_tokens = uncached + cached + output + reasoning;
+        delta.billable_total_tokens = delta.total_tokens;
+        delta.conversation_count = 1;
+        billedPlanner = delta.total_tokens > 0;
+
+        contextTokens = uncached + cached;
+      } else {
+        const content = typeof parsed.content === "string" ? parsed.content : "";
+        const thinking = typeof parsed.thinking === "string" ? parsed.thinking : "";
+
+        if (dbContextTokens > 0) {
+          contextTokens = dbContextTokens;
+        }
+        if (lastPlannerModel && model !== lastPlannerModel) {
+          previousContextTokens = 0;
+        }
+        const inputDelta = Math.max(0, contextTokens - previousContextTokens);
+
+        const outputTokens =
+          antigravityValueTokens(content) + antigravityValueTokens(parsed.tool_calls);
+        const reasoningTokens = antigravityValueTokens(thinking);
+
+        delta.input_tokens = inputDelta;
+        delta.output_tokens = outputTokens;
+        delta.reasoning_output_tokens = reasoningTokens;
+        delta.total_tokens = inputDelta + outputTokens + reasoningTokens;
+        delta.billable_total_tokens = delta.total_tokens;
+        delta.conversation_count = 1;
+        billedPlanner = delta.total_tokens > 0;
       }
-      if (lastPlannerModel && model !== lastPlannerModel) {
-        previousContextTokens = 0;
-      }
-      const inputDelta = Math.max(0, contextTokens - previousContextTokens);
-
-      const outputTokens =
-        antigravityValueTokens(content) + antigravityValueTokens(parsed.tool_calls);
-      const reasoningTokens = antigravityValueTokens(thinking);
-
-      delta.input_tokens = inputDelta;
-      delta.output_tokens = outputTokens;
-      delta.reasoning_output_tokens = reasoningTokens;
-      delta.total_tokens = inputDelta + outputTokens + reasoningTokens;
-      delta.billable_total_tokens = delta.total_tokens;
-      delta.conversation_count = 1;
-      billedPlanner = delta.total_tokens > 0;
     }
 
     if (!billedPlanner) {

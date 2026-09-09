@@ -12682,7 +12682,80 @@ test("extractAntigravityGenInfo extracts usage metadata from protobuf payload", 
   assert.equal(info.reasoningOutput, 69);
 });
 
+test("parseAntigravityIncremental records cached input tokens and reasoning tokens from SQLite gen_metadata", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-cache-"));
+  try {
+    const { transcriptPath, queuePath } = await setupAntigravitySqliteSession(tmp, {
+      protos: [
+        buildAntigravityTestProto({
+          model: "gemini-3.8-flash",
+          lastStepIndex: 0,
+          uncachedInput: 18239,
+          cachedInput: 0,
+          outputTokens: 1366,
+          textOutput: 1286,
+          reasoningOutput: 80,
+        }),
+        buildAntigravityTestProto({
+          model: "gemini-3.8-flash",
+          lastStepIndex: 2,
+          uncachedInput: 4583,
+          cachedInput: 16319,
+          outputTokens: 151,
+          textOutput: 82,
+          reasoningOutput: 69,
+        }),
+      ],
+      lines: antigravityPlannerLines([
+        {
+          userStep: 0,
+          userAt: "2026-04-05T14:00:00.000Z",
+          userContent: "hello",
+          plannerStep: 1,
+          plannerAt: "2026-04-05T14:01:00.000Z",
+          plannerContent: "hi",
+          thinking: "think1",
+        },
+        {
+          userStep: 2,
+          userAt: "2026-04-05T14:02:00.000Z",
+          userContent: "next prompt",
+          plannerStep: 3,
+          plannerAt: "2026-04-05T14:03:00.000Z",
+          plannerContent: "done",
+          thinking: "think2",
+        },
+      ]),
+    });
+    const cursors = { version: 1, files: {}, updatedAt: null };
 
+    const result = await parseAntigravityIncremental({
+      sessionFiles: [transcriptPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(result.eventsAggregated, 2);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].source, "antigravity");
+    assert.equal(queued[0].model, "gemini-3.8-flash");
+    assert.equal(queued[0].input_tokens, 18239 + 4583);
+    assert.equal(queued[0].cached_input_tokens, 16319);
+    assert.equal(queued[0].output_tokens, 1286 + 82);
+    assert.equal(queued[0].reasoning_output_tokens, 80 + 69);
+    assert.equal(queued[0].conversation_count, 2);
+    assert.equal(
+      queued[0].total_tokens,
+      queued[0].input_tokens +
+        queued[0].cached_input_tokens +
+        queued[0].output_tokens +
+        queued[0].reasoning_output_tokens,
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
 
 test("parseAntigravityIncremental uses SQLite context size without inferring cache hits", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-sqlite-"));
