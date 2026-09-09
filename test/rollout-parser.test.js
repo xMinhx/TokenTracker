@@ -12540,7 +12540,16 @@ function encodeAntigravityTestVi(f, val) {
   return Buffer.concat([encodeAntigravityTestTag(f, 0), encodeAntigravityTestVarint(val)]);
 }
 
-function buildAntigravityTestProto({ model, contextTokens, lastStepIndex }) {
+function buildAntigravityTestProto({
+  model,
+  contextTokens,
+  lastStepIndex,
+  uncachedInput,
+  cachedInput,
+  outputTokens,
+  textOutput,
+  reasoningOutput,
+}) {
   const parts = [];
   if (model) parts.push(encodeAntigravityTestLd(19, model));
   if (Number.isFinite(contextTokens)) {
@@ -12548,6 +12557,21 @@ function buildAntigravityTestProto({ model, contextTokens, lastStepIndex }) {
     const f10 = encodeAntigravityTestLd(10, f1);
     const f9 = encodeAntigravityTestLd(9, f10);
     parts.push(f9);
+  }
+  if (
+    Number.isFinite(uncachedInput) ||
+    Number.isFinite(cachedInput) ||
+    Number.isFinite(outputTokens) ||
+    Number.isFinite(textOutput) ||
+    Number.isFinite(reasoningOutput)
+  ) {
+    const f4Parts = [];
+    if (Number.isFinite(uncachedInput)) f4Parts.push(encodeAntigravityTestVi(2, uncachedInput));
+    if (Number.isFinite(outputTokens)) f4Parts.push(encodeAntigravityTestVi(3, outputTokens));
+    if (Number.isFinite(cachedInput)) f4Parts.push(encodeAntigravityTestVi(5, cachedInput));
+    if (Number.isFinite(textOutput)) f4Parts.push(encodeAntigravityTestVi(9, textOutput));
+    if (Number.isFinite(reasoningOutput)) f4Parts.push(encodeAntigravityTestVi(10, reasoningOutput));
+    parts.push(encodeAntigravityTestLd(4, Buffer.concat(f4Parts)));
   }
   if (lastStepIndex != null) {
     const k = encodeAntigravityTestLd(1, "last_step_index");
@@ -12633,12 +12657,32 @@ test("extractAntigravityGenInfo extracts model, context tokens, and step index f
     lastStepIndex: 0,
   });
   const info = extractAntigravityGenInfo(proto);
-  assert.deepEqual(info, {
-    model: "gemini-3.8-flash",
-    contextTokens: 25000,
-    lastStepIndex: 0,
-  });
+  assert.equal(info.model, "gemini-3.8-flash");
+  assert.equal(info.contextTokens, 25000);
+  assert.equal(info.lastStepIndex, 0);
 });
+
+test("extractAntigravityGenInfo extracts usage metadata from protobuf payload", () => {
+  const proto = buildAntigravityTestProto({
+    model: "gemini-3.8-flash",
+    lastStepIndex: 0,
+    uncachedInput: 4583,
+    cachedInput: 16319,
+    outputTokens: 151,
+    textOutput: 82,
+    reasoningOutput: 69,
+  });
+  const info = extractAntigravityGenInfo(proto);
+  assert.equal(info.model, "gemini-3.8-flash");
+  assert.equal(info.lastStepIndex, 0);
+  assert.equal(info.uncachedInput, 4583);
+  assert.equal(info.cachedInput, 16319);
+  assert.equal(info.outputTokens, 151);
+  assert.equal(info.textOutput, 82);
+  assert.equal(info.reasoningOutput, 69);
+});
+
+
 
 test("parseAntigravityIncremental uses SQLite context size without inferring cache hits", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-sqlite-"));

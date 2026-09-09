@@ -19407,7 +19407,52 @@ function extractAntigravityGenInfo(buf) {
     }
   }
 
-  return { model, contextTokens, lastStepIndex };
+  let uncachedInput;
+  let cachedInput;
+  let outputTokens;
+  let textOutput;
+  let reasoningOutput;
+  let hasUsageMetadata = false;
+
+  const f4 = inner.find((f) => f.num === 4)?.val;
+  if (f4) {
+    const f4fields = findAntigravityProtoFields(f4);
+    const pTok = f4fields.find((f) => f.num === 2)?.val;
+    const cTok = f4fields.find((f) => f.num === 5)?.val;
+    const oTok = f4fields.find((f) => f.num === 3)?.val;
+    const tTok = f4fields.find((f) => f.num === 9)?.val;
+    const rTok = f4fields.find((f) => f.num === 10)?.val;
+    if (
+      Number.isFinite(pTok) ||
+      Number.isFinite(cTok) ||
+      Number.isFinite(oTok) ||
+      Number.isFinite(tTok) ||
+      Number.isFinite(rTok)
+    ) {
+      hasUsageMetadata = true;
+      uncachedInput = Number.isFinite(pTok) ? pTok : 0;
+      cachedInput = Number.isFinite(cTok) ? cTok : 0;
+      outputTokens = Number.isFinite(oTok) ? oTok : 0;
+      textOutput = Number.isFinite(tTok) ? tTok : 0;
+      reasoningOutput = Number.isFinite(rTok) ? rTok : 0;
+    }
+  }
+
+  return {
+    model,
+    contextTokens,
+    lastStepIndex,
+    ...(hasUsageMetadata
+      ? {
+          uncachedInput,
+          cachedInput,
+          outputTokens,
+          textOutput,
+          reasoningOutput,
+          hasUsageMetadata: true,
+        }
+      : {}),
+  };
 }
 
 function resolveAntigravityDbPath(transcriptPath) {
@@ -19432,7 +19477,11 @@ function readAntigravityConversationDb(dbPath) {
       if (!r || typeof r.hex !== "string" || !r.hex.startsWith("X'")) continue;
       const buf = Buffer.from(r.hex.slice(2, -1), "hex");
       const info = extractAntigravityGenInfo(buf);
-      if (info && info.lastStepIndex != null && info.contextTokens > 0) {
+      if (
+        info &&
+        info.lastStepIndex != null &&
+        (info.hasUsageMetadata || info.contextTokens > 0)
+      ) {
         stepMap.set(info.lastStepIndex + 1, info);
       }
     }
