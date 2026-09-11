@@ -18631,6 +18631,69 @@ async function listAntigravityTranscripts(geminiHome) {
 }
 
 const ANTIGRAVITY_CURSOR_VERSION = 2;
+const ANTIGRAVITY_MAX_CONTRIBUTIONS = 4096;
+
+function capAntigravityContributions(contributions) {
+  if (!contributions || typeof contributions !== "object") {
+    return { contributions: {}, complete: true };
+  }
+  const entries = Object.entries(contributions);
+  if (entries.length <= ANTIGRAVITY_MAX_CONTRIBUTIONS) {
+    return { contributions, complete: true };
+  }
+
+  entries.sort(([, left], [, right]) => {
+    const leftTime = Date.parse(left?.bucketStart || "");
+    const rightTime = Date.parse(right?.bucketStart || "");
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return rightTime - leftTime;
+    }
+    if (Number.isFinite(rightTime) !== Number.isFinite(leftTime)) {
+      return Number.isFinite(rightTime) ? 1 : -1;
+    }
+    return 0;
+  });
+
+  return {
+    contributions: Object.fromEntries(entries.slice(0, ANTIGRAVITY_MAX_CONTRIBUTIONS)),
+    complete: false,
+  };
+}
+
+function resetAntigravityBucketsForRebuild({
+  hourlyState,
+  projectState,
+  sources,
+  touchedBuckets,
+  projectTouchedBuckets,
+}) {
+  if (!sources || sources.size === 0) return;
+
+  for (const [key, bucket] of Object.entries(hourlyState?.buckets || {})) {
+    if (!bucket || !bucket.totals) continue;
+    const bucketSource = normalizeSourceInput(parseBucketKey(key).source);
+    if (!sources.has(bucketSource)) continue;
+    bucket.totals = initTotals();
+    bucket.queuedKey = null;
+    bucket.retractedUnknownKey = null;
+    touchedBuckets.add(key);
+  }
+
+  for (const key of Object.keys(hourlyState?.groupQueued || {})) {
+    const groupSource = normalizeSourceInput(key.split(BUCKET_SEPARATOR)[0]);
+    if (sources.has(groupSource)) delete hourlyState.groupQueued[key];
+  }
+
+  if (!projectState || !projectTouchedBuckets) return;
+  for (const [key, bucket] of Object.entries(projectState.buckets || {})) {
+    const keyParts = key.split(BUCKET_SEPARATOR);
+    const bucketSource = normalizeSourceInput(bucket?.source || keyParts.at(-2));
+    if (!sources.has(bucketSource) || !bucket?.totals) continue;
+    bucket.totals = initTotals();
+    bucket.queuedKey = null;
+    projectTouchedBuckets.add(key);
+  }
+}
 
 async function parseAntigravityIncremental({
   sessionFiles,
@@ -18659,6 +18722,83 @@ async function parseAntigravityIncremental({
 
   if (!cursors.files || typeof cursors.files !== "object") {
     cursors.files = {};
+  }
+
+  const fileSources = new Set();
+  for (const entry of files) {
+    const fileSource =
+      typeof entry === "string"
+        ? defaultSource
+        : normalizeSourceInput(entry?.source) || defaultSource;
+    fileSources.add(fileSource);
+  }
+  if (fileSources.size === 0) fileSources.add(defaultSource);
+
+  // Legacy cursors have no per-file contribution ledger. Rebuilding every
+  // Antigravity source bucket from the current files is the only safe baseline:
+  // a historical SQLite context value may have changed, and subtracting a
+  // reconstruction from one file could otherwise remove another file's usage.
+  const liveFilePaths = new Set(
+    files
+      .map((entry) => (typeof entry === "string" ? entry : entry?.path))
+      .filter(Boolean),
+  );
+  const incompleteContributionPaths = new Set();
+  let needsFullRebuild = false;
+  for (const [filePath, prev] of Object.entries(cursors.files)) {
+    if (!resolveAntigravityDbPath(filePath) || !prev || Number(prev.lastLine || 0) <= 0) {
+      continue;
+    }
+    if (
+      prev.cursorVersion !== ANTIGRAVITY_CURSOR_VERSION ||
+      !prev.contributions ||
+      typeof prev.contributions !== "object"
+    ) {
+      needsFullRebuild = true;
+      break;
+    }
+    if (prev.contributionsComplete === false) incompleteContributionPaths.add(filePath);
+  }
+
+  // A capped contribution ledger is safe while its transcript/SQLite identity
+  // is unchanged. If an incomplete ledger needs reconciliation, rebuild the
+  // complete source baseline before applying any per-file deltas.
+  if (!needsFullRebuild && incompleteContributionPaths.size > 0) {
+    for (const filePath of incompleteContributionPaths) {
+      if (!liveFilePaths.has(filePath)) {
+        needsFullRebuild = true;
+        break;
+      }
+      const prev = cursors.files[filePath];
+      const st = await fs.stat(filePath).catch(() => null);
+      const dbPath = resolveAntigravityDbPath(filePath);
+      const dbSt = dbPath ? await fs.stat(dbPath).catch(() => null) : null;
+      const sameInode = st && prev.inode === (st.ino || 0);
+      const transcriptCanAppend =
+        sameInode && (Number.isFinite(st.size) ? st.size : 0) >= Number(prev.size || 0);
+      const sameDb =
+        Number(prev.dbMtimeMs || 0) === Number(dbSt?.mtimeMs || 0) &&
+        Number(prev.dbSize || 0) === Number(dbSt?.size || 0);
+      if (!transcriptCanAppend || !sameDb) {
+        needsFullRebuild = true;
+        break;
+      }
+    }
+  }
+
+  if (needsFullRebuild) {
+    for (const filePath of Object.keys(cursors.files)) {
+      if (resolveAntigravityDbPath(filePath) && !liveFilePaths.has(filePath)) {
+        delete cursors.files[filePath];
+      }
+    }
+    resetAntigravityBucketsForRebuild({
+      hourlyState,
+      projectState,
+      sources: fileSources,
+      touchedBuckets,
+      projectTouchedBuckets,
+    });
   }
 
   for (let idx = 0; idx < files.length; idx++) {
@@ -18691,7 +18831,7 @@ async function parseAntigravityIncremental({
       Number(prev.dbSize || 0) === dbSize;
     const currentVersion = prev && prev.cursorVersion === ANTIGRAVITY_CURSOR_VERSION;
 
-    if (sameTranscript && sameDb && currentVersion) {
+    if (sameTranscript && sameDb && currentVersion && !needsFullRebuild) {
       filesProcessed += 1;
       if (cb) {
         cb({
@@ -18718,12 +18858,20 @@ async function parseAntigravityIncremental({
     const projectRef = projectContext?.projectRef || null;
     const projectKey = projectContext?.projectKey || null;
 
-    // Reconcile when the transcript is unchanged but SQLite updated or cursor is migrating.
-    const needsReconcile = sameTranscript && prev && (!currentVersion || !sameDb);
+    // Reconcile historical contributions whenever the cursor needs migration or
+    // SQLite changed, even when new transcript lines were appended in the same
+    // sync. Otherwise the incremental branch stamps a migrated cursor without
+    // repairing its old, incomplete totals.
+    const needsReconcile = !needsFullRebuild && prev && (!currentVersion || !sameDb);
     let result;
 
-    if (needsReconcile) {
-      if (prev && prev.contributions && typeof prev.contributions === "object") {
+    if (needsFullRebuild || needsReconcile) {
+      if (
+        !needsFullRebuild &&
+        prev &&
+        prev.contributions &&
+        typeof prev.contributions === "object"
+      ) {
         for (const c of Object.values(prev.contributions)) {
           if (!c || !c.totals) continue;
           const oldBucket = getHourlyBucket(hourlyState, c.source, c.model, c.bucketStart);
@@ -18741,36 +18889,7 @@ async function parseAntigravityIncremental({
             projectTouchedBuckets.add(projectBucketKey(c.projectKey, c.source, c.bucketStart));
           }
         }
-      } else if (prev && Number(prev.lastLine || 0) > 0) {
-        const legacyResult = await parseAntigravityFile({
-          filePath,
-          lastLine: 0,
-          maxLine: Number(prev.lastLine || 0),
-          legacyMode: true,
-          applyBuckets: false,
-          source: fileSource,
-          projectKey,
-          projectRef,
-        });
-        for (const c of Object.values(legacyResult.contributions || {})) {
-          if (!c || !c.totals) continue;
-          const oldBucket = getHourlyBucket(hourlyState, c.source, c.model, c.bucketStart);
-          subtractTotals(oldBucket.totals, c.totals);
-          touchedBuckets.add(bucketKey(c.source, c.model, c.bucketStart));
-          if (projectEnabled && c.projectKey && projectState && projectTouchedBuckets) {
-            const oldProjectBucket = getProjectBucket(
-              projectState,
-              c.projectKey,
-              c.source,
-              c.bucketStart,
-              c.projectRef || null,
-            );
-            subtractTotals(oldProjectBucket.totals, c.totals);
-            projectTouchedBuckets.add(projectBucketKey(c.projectKey, c.source, c.bucketStart));
-          }
-        }
       }
-
       result = await parseAntigravityFile({
         filePath,
         lastLine: 0,
@@ -18824,6 +18943,7 @@ async function parseAntigravityIncremental({
       result.contributions = mergedContributions;
     }
 
+    const contributionState = capAntigravityContributions(result.contributions);
     cursors.files[key] = {
       inode,
       size,
@@ -18837,7 +18957,8 @@ async function parseAntigravityIncremental({
       currentModel: result.currentModel,
       lastPlannerModel: result.lastPlannerModel,
       usageSource: result.usageSource,
-      contributions: result.contributions,
+      contributions: contributionState.contributions,
+      contributionsComplete: contributionState.complete,
       updatedAt: new Date().toISOString(),
     };
 
@@ -19042,7 +19163,6 @@ async function parseAntigravityFile({
   lastLine = 0,
   maxLine = null,
   watermarkLine = 0,
-  legacyMode = false,
   applyBuckets = true,
   initialContextTokens,
   initialPrevContext,
@@ -19144,7 +19264,7 @@ async function parseAntigravityFile({
 
     if (!isNewEvent) {
       if (parsed.type === "PLANNER_RESPONSE") {
-        if (!legacyMode && dbTurn?.hasUsageMetadata) {
+        if (dbTurn?.hasUsageMetadata) {
           contextTokens = (dbTurn.uncachedInput || 0) + (dbTurn.cachedInput || 0);
         } else if (dbContextTokens > 0) {
           contextTokens = dbContextTokens;
@@ -19178,7 +19298,7 @@ async function parseAntigravityFile({
     let billedPlanner = false;
 
     if (parsed.type === "PLANNER_RESPONSE") {
-      if (!legacyMode && dbTurn?.hasUsageMetadata) {
+      if (dbTurn?.hasUsageMetadata) {
         const uncached = dbTurn.uncachedInput || 0;
         const cached = dbTurn.cachedInput || 0;
         const reasoning = dbTurn.reasoningOutput || 0;

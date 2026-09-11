@@ -13113,7 +13113,7 @@ test("parseAntigravityIncremental SQLite full scan matches incremental append", 
   }
 });
 
-test("parseAntigravityIncremental reconciles a legacy estimated cursor with SQLite context", async () => {
+test("parseAntigravityIncremental reconciles a legacy cursor with SQLite context after append", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-legacy-cursor-"));
   try {
     const firstLines = antigravityPlannerLines([
@@ -13191,9 +13191,11 @@ test("parseAntigravityIncremental reconciles a legacy estimated cursor with SQLi
     const sqliteRow = queued.filter((row) => row.model === "gemini-3.8-flash").at(-1);
     assert.equal(estimatedRow.input_tokens, estimatedInput);
     assert.equal(estimatedRow.cached_input_tokens, 0);
-    assert.equal(sqliteRow.input_tokens, 5000);
+    // SQLite changed while the transcript grew, so reconciliation rebuilds both
+    // historical planners rather than applying only the appended planner.
+    assert.equal(sqliteRow.input_tokens, 30000);
     assert.equal(sqliteRow.cached_input_tokens, 0);
-    assert.equal(sqliteRow.conversation_count, 1);
+    assert.equal(sqliteRow.conversation_count, 2);
     assert.equal(cursors.files[transcriptPath].usageSource, "sqlite");
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
@@ -13364,7 +13366,7 @@ test("parseAntigravityIncremental sparse sqlite full scan matches incremental ap
   }
 });
 
-test("parseAntigravityIncremental re-walk with sparse sqlite keeps prior planner output", async () => {
+test("parseAntigravityIncremental re-walk with sparse sqlite rebuilds historical context", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-sparse-rewalk-"));
   try {
     const planner1 = "hi";
@@ -13432,9 +13434,10 @@ test("parseAntigravityIncremental re-walk with sparse sqlite keeps prior planner
       .at(-1);
     assert.equal(
       sqliteRow.input_tokens,
-      antigravityTestTokens(planner1) + antigravityTestTokens(user2),
+      25000 + antigravityTestTokens(planner1) + antigravityTestTokens(user2),
     );
     assert.equal(sqliteRow.cached_input_tokens, 0);
+    assert.equal(sqliteRow.conversation_count, 2);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
