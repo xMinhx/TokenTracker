@@ -13376,7 +13376,7 @@ test("parseAntigravityIncremental migrates legacy v0.96.2 cursor on unchanged fi
       cursors,
       queuePath,
     });
-    assert.equal(first.eventsAggregated, 1);
+    assert.equal(first.eventsAggregated, 0);
     assert.equal(first.bucketsQueued, 1);
 
     const queued = await readJsonLines(queuePath);
@@ -13477,7 +13477,7 @@ test("parseAntigravityIncremental reconciles delayed SQLite metadata updates and
       cursors,
       queuePath,
     });
-    assert.equal(second.eventsAggregated, 1);
+    assert.equal(second.eventsAggregated, 0);
     assert.equal(second.bucketsQueued, 1);
 
     const secondQueued = await readJsonLines(queuePath);
@@ -13590,6 +13590,81 @@ test("parseAntigravityIncremental reconciles project queue totals on SQLite meta
     assert.equal(third.eventsAggregated, 0);
     assert.equal(third.bucketsQueued, 0);
     assert.equal(third.projectBucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseAntigravityIncremental multi-turn reconciliation does not overcount eventsAggregated", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-watermark-"));
+  try {
+    const turns = [
+      { userStep: 0, userAt: "2026-04-05T14:00:00.000Z", userContent: "q1", plannerStep: 1, plannerAt: "2026-04-05T14:01:00.000Z", plannerContent: "a1", thinking: "t1" },
+      { userStep: 2, userAt: "2026-04-05T14:02:00.000Z", userContent: "q2", plannerStep: 3, plannerAt: "2026-04-05T14:03:00.000Z", plannerContent: "a2", thinking: "t2" },
+      { userStep: 4, userAt: "2026-04-05T14:04:00.000Z", userContent: "q3", plannerStep: 5, plannerAt: "2026-04-05T14:05:00.000Z", plannerContent: "a3", thinking: "t3" },
+    ];
+    const lines = antigravityPlannerLines(turns);
+    const { transcriptPath, dbPath, queuePath } = await setupAntigravitySqliteSession(tmp, {
+      protos: [
+        buildAntigravityTestProto({ model: "gemini-3.8-flash", lastStepIndex: 0, uncachedInput: 100, cachedInput: 50, outputTokens: 20, textOutput: 15, reasoningOutput: 5 }),
+        buildAntigravityTestProto({ model: "gemini-3.8-flash", lastStepIndex: 2, uncachedInput: 120, cachedInput: 60, outputTokens: 25, textOutput: 20, reasoningOutput: 5 }),
+        buildAntigravityTestProto({ model: "gemini-3.8-flash", lastStepIndex: 4, uncachedInput: 150, cachedInput: 80, outputTokens: 30, textOutput: 25, reasoningOutput: 5 }),
+      ],
+      lines,
+    });
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    // Fresh sync: all 3 turns count as events
+    const first = await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
+    assert.equal(first.eventsAggregated, 3);
+    assert.equal(first.bucketsQueued, 1);
+
+    // Update SQLite for turn 3 (delayed cached tokens 80 -> 200) without touching transcript.jsonl
+    const updatedProto = buildAntigravityTestProto({
+      model: "gemini-3.8-flash",
+      lastStepIndex: 4,
+      uncachedInput: 150,
+      cachedInput: 200,
+      outputTokens: 30,
+      textOutput: 25,
+      reasoningOutput: 5,
+    });
+    sqliteCli.execFileSync("sqlite3", [
+      dbPath,
+      `UPDATE gen_metadata SET data = X'${updatedProto.toString("hex")}' WHERE idx = 2;`,
+    ]);
+    const futureDate = new Date(Date.now() + 2000);
+    await fs.utimes(dbPath, futureDate, futureDate);
+
+    // Reconcile unchanged transcript: eventsAggregated must be 0 (NOT 3 historical turns!)
+    const second = await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(second.bucketsQueued, 1);
+
+    // Now append turn 4 to the transcript
+    const turn4 = [
+      { userStep: 6, userAt: "2026-04-05T14:06:00.000Z", userContent: "q4", plannerStep: 7, plannerAt: "2026-04-05T14:07:00.000Z", plannerContent: "a4", thinking: "t4" },
+    ];
+    const turn4Proto = buildAntigravityTestProto({
+      model: "gemini-3.8-flash",
+      lastStepIndex: 6,
+      uncachedInput: 180,
+      cachedInput: 250,
+      outputTokens: 35,
+      textOutput: 30,
+      reasoningOutput: 5,
+    });
+    sqliteCli.execFileSync("sqlite3", [
+      dbPath,
+      `INSERT INTO gen_metadata (idx, data) VALUES (3, X'${turn4Proto.toString("hex")}');`,
+    ]);
+    const allLines = antigravityPlannerLines([...turns, ...turn4]);
+    await fs.writeFile(transcriptPath, allLines.map((l) => JSON.stringify(l)).join("\n"));
+
+    // Sync with append: exactly 1 new event counted
+    const third = await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
+    assert.equal(third.eventsAggregated, 1);
+    assert.equal(third.bucketsQueued, 1);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

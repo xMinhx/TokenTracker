@@ -19233,10 +19233,7 @@ async function parseAntigravityFile({
         projectTouchedBuckets.add(projectBucketKey(projectKey, source, bucketStart));
       }
     }
-    const isNewForCounter =
-      watermarkLine > 0 && lines.length > watermarkLine
-        ? i >= watermarkLine
-        : true;
+    const isNewForCounter = watermarkLine > 0 ? i >= watermarkLine : true;
     if (isNewForCounter) {
       eventsAggregated += 1;
     }
