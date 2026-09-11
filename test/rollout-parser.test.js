@@ -13665,6 +13665,11 @@ test("parseAntigravityIncremental multi-turn reconciliation does not overcount e
     const third = await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
     assert.equal(third.eventsAggregated, 1);
     assert.equal(third.bucketsQueued, 1);
+
+    // Unchanged sync after append: must be idempotent no-op
+    const fourth = await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
+    assert.equal(fourth.eventsAggregated, 0);
+    assert.equal(fourth.bucketsQueued, 0);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
