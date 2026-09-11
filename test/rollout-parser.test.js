@@ -12402,6 +12402,7 @@ function buildAntigravityTestProto({
   model,
   contextTokens,
   lastStepIndex,
+  systemTokens,
   uncachedInput,
   cachedInput,
   outputTokens,
@@ -12417,6 +12418,7 @@ function buildAntigravityTestProto({
     parts.push(f9);
   }
   if (
+    Number.isFinite(systemTokens) ||
     Number.isFinite(uncachedInput) ||
     Number.isFinite(cachedInput) ||
     Number.isFinite(outputTokens) ||
@@ -12424,6 +12426,7 @@ function buildAntigravityTestProto({
     Number.isFinite(reasoningOutput)
   ) {
     const f4Parts = [];
+    if (Number.isFinite(systemTokens)) f4Parts.push(encodeAntigravityTestVi(1, systemTokens));
     if (Number.isFinite(uncachedInput)) f4Parts.push(encodeAntigravityTestVi(2, uncachedInput));
     if (Number.isFinite(outputTokens)) f4Parts.push(encodeAntigravityTestVi(3, outputTokens));
     if (Number.isFinite(cachedInput)) f4Parts.push(encodeAntigravityTestVi(5, cachedInput));
@@ -12553,6 +12556,21 @@ test("extractAntigravityGenInfo handles absent textOutput and defaults to zero",
   assert.equal(info.outputTokens, 300);
   assert.equal(info.reasoningOutput, 100);
   assert.equal(info.textOutput, 0);
+});
+
+test("extractAntigravityGenInfo includes f4.1 system prompt prefix in uncachedInput", () => {
+  const proto = buildAntigravityTestProto({
+    model: "gemini-3.8-flash",
+    lastStepIndex: 0,
+    systemTokens: 1016,
+    uncachedInput: 2000,
+    cachedInput: 5000,
+    outputTokens: 200,
+  });
+  const info = extractAntigravityGenInfo(proto);
+  assert.equal(info.uncachedInput, 3016); // 1016 system + 2000 prompt
+  assert.equal(info.cachedInput, 5000);
+  assert.equal(info.outputTokens, 200);
 });
 
 test("parseAntigravityIncremental records cached input tokens and reasoning tokens from SQLite gen_metadata", async () => {

@@ -18826,13 +18826,22 @@ function extractAntigravityGenInfo(buf) {
 
   const f4 = inner.find((f) => f.num === 4)?.val;
   if (f4) {
+    // Antigravity internal usage message layout (Field 4):
+    // - f4.1: system / tool instruction prefix tokens (per-model fixed prefix)
+    // - f4.2: user / prompt tokens for this turn
+    // - f4.3: total output tokens checksum (f4.9 text + f4.10 reasoning)
+    // - f4.5: cached prompt tokens (cache read)
+    // - f4.9: text output tokens
+    // - f4.10: reasoning / thought tokens
     const f4fields = findAntigravityProtoFields(f4);
+    const sTok = f4fields.find((f) => f.num === 1)?.val;
     const pTok = f4fields.find((f) => f.num === 2)?.val;
     const cTok = f4fields.find((f) => f.num === 5)?.val;
     const oTok = f4fields.find((f) => f.num === 3)?.val;
     const tTok = f4fields.find((f) => f.num === 9)?.val;
     const rTok = f4fields.find((f) => f.num === 10)?.val;
     if (
+      Number.isFinite(sTok) ||
       Number.isFinite(pTok) ||
       Number.isFinite(cTok) ||
       Number.isFinite(oTok) ||
@@ -18840,7 +18849,9 @@ function extractAntigravityGenInfo(buf) {
       Number.isFinite(rTok)
     ) {
       hasUsageMetadata = true;
-      uncachedInput = Number.isFinite(pTok) ? pTok : 0;
+      const sysTokens = Number.isFinite(sTok) ? sTok : 0;
+      const promptTokens = Number.isFinite(pTok) ? pTok : 0;
+      uncachedInput = sysTokens + promptTokens;
       cachedInput = Number.isFinite(cTok) ? cTok : 0;
       outputTokens = Number.isFinite(oTok) ? oTok : 0;
       textOutput = Number.isFinite(tTok) ? tTok : 0;
