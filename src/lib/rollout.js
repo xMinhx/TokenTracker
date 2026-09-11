@@ -18602,6 +18602,8 @@ async function listAntigravityTranscripts(geminiHome) {
   return lists.flat();
 }
 
+const ANTIGRAVITY_CURSOR_VERSION = 2;
+
 async function parseAntigravityIncremental({
   sessionFiles,
   cursors,
@@ -18648,9 +18650,20 @@ async function parseAntigravityIncremental({
     const size = Number.isFinite(st.size) ? st.size : 0;
     const mtimeMs = Number.isFinite(st.mtimeMs) ? st.mtimeMs : 0;
 
-    const unchanged =
-      prev && prev.inode === inode && prev.size === size && prev.mtimeMs === mtimeMs;
-    if (unchanged) {
+    const dbPath = resolveAntigravityDbPath(filePath);
+    const dbSt = dbPath ? await fs.stat(dbPath).catch(() => null) : null;
+    const dbMtimeMs = dbSt ? Number(dbSt.mtimeMs || 0) : 0;
+    const dbSize = dbSt ? Number(dbSt.size || 0) : 0;
+
+    const sameInode = prev && prev.inode === inode;
+    const sameTranscript = sameInode && prev.size === size && prev.mtimeMs === mtimeMs;
+    const sameDb =
+      prev &&
+      Number(prev.dbMtimeMs || 0) === dbMtimeMs &&
+      Number(prev.dbSize || 0) === dbSize;
+    const currentVersion = prev && prev.cursorVersion === ANTIGRAVITY_CURSOR_VERSION;
+
+    if (sameTranscript && sameDb && currentVersion) {
       filesProcessed += 1;
       if (cb) {
         cb({
@@ -18665,15 +18678,6 @@ async function parseAntigravityIncremental({
       continue;
     }
 
-    const sameFile = prev && prev.inode === inode;
-    const lastLine = sameFile ? Number(prev.lastLine || 0) : 0;
-    const initialContextTokens = sameFile ? Number(prev.contextTokens || 0) : 0;
-    const initialPrevContext = sameFile ? Number(prev.previousContextTokens || 0) : 0;
-    const initialModel = sameFile && typeof prev.currentModel === "string" ? prev.currentModel : null;
-    const initialLastPlannerModel =
-      sameFile && typeof prev.lastPlannerModel === "string" ? prev.lastPlannerModel : null;
-    const initialUsageSource = sameFile && typeof prev.usageSource === "string" ? prev.usageSource : null;
-
     const projectContext = projectEnabled
       ? await resolveProjectContextForFile({
           filePath,
@@ -18686,33 +18690,126 @@ async function parseAntigravityIncremental({
     const projectRef = projectContext?.projectRef || null;
     const projectKey = projectContext?.projectKey || null;
 
-    const result = await parseAntigravityFile({
-      filePath,
-      lastLine,
-      initialContextTokens,
-      initialPrevContext,
-      initialModel,
-      initialLastPlannerModel,
-      initialUsageSource,
-      hourlyState,
-      touchedBuckets,
-      source: fileSource,
-      projectState,
-      projectTouchedBuckets,
-      projectRef,
-      projectKey,
-    });
+    // Reconcile when the transcript is unchanged but SQLite updated or cursor is migrating.
+    const needsReconcile = sameTranscript && prev && (!currentVersion || !sameDb);
+    let result;
+
+    if (needsReconcile) {
+      if (prev && prev.contributions && typeof prev.contributions === "object") {
+        for (const c of Object.values(prev.contributions)) {
+          if (!c || !c.totals) continue;
+          const oldBucket = getHourlyBucket(hourlyState, c.source, c.model, c.bucketStart);
+          subtractTotals(oldBucket.totals, c.totals);
+          touchedBuckets.add(bucketKey(c.source, c.model, c.bucketStart));
+          if (projectEnabled && c.projectKey && projectState && projectTouchedBuckets) {
+            const oldProjectBucket = getProjectBucket(
+              projectState,
+              c.projectKey,
+              c.source,
+              c.bucketStart,
+              c.projectRef || null,
+            );
+            subtractTotals(oldProjectBucket.totals, c.totals);
+            projectTouchedBuckets.add(projectBucketKey(c.projectKey, c.source, c.bucketStart));
+          }
+        }
+      } else if (prev && Number(prev.lastLine || 0) > 0) {
+        const legacyResult = await parseAntigravityFile({
+          filePath,
+          lastLine: 0,
+          maxLine: Number(prev.lastLine || 0),
+          legacyMode: true,
+          applyBuckets: false,
+          source: fileSource,
+          projectKey,
+          projectRef,
+        });
+        for (const c of Object.values(legacyResult.contributions || {})) {
+          if (!c || !c.totals) continue;
+          const oldBucket = getHourlyBucket(hourlyState, c.source, c.model, c.bucketStart);
+          subtractTotals(oldBucket.totals, c.totals);
+          touchedBuckets.add(bucketKey(c.source, c.model, c.bucketStart));
+          if (projectEnabled && c.projectKey && projectState && projectTouchedBuckets) {
+            const oldProjectBucket = getProjectBucket(
+              projectState,
+              c.projectKey,
+              c.source,
+              c.bucketStart,
+              c.projectRef || null,
+            );
+            subtractTotals(oldProjectBucket.totals, c.totals);
+            projectTouchedBuckets.add(projectBucketKey(c.projectKey, c.source, c.bucketStart));
+          }
+        }
+      }
+
+      result = await parseAntigravityFile({
+        filePath,
+        lastLine: 0,
+        watermarkLine: Number(prev?.lastLine || 0),
+        hourlyState,
+        touchedBuckets,
+        source: fileSource,
+        projectState,
+        projectTouchedBuckets,
+        projectRef,
+        projectKey,
+      });
+    } else {
+      const lastLine = sameInode ? Number(prev?.lastLine || 0) : 0;
+      const initialContextTokens = sameInode ? Number(prev?.contextTokens || 0) : 0;
+      const initialPrevContext = sameInode ? Number(prev?.previousContextTokens || 0) : 0;
+      const initialModel =
+        sameInode && typeof prev?.currentModel === "string" ? prev.currentModel : null;
+      const initialLastPlannerModel =
+        sameInode && typeof prev?.lastPlannerModel === "string"
+          ? prev.lastPlannerModel
+          : null;
+      const initialUsageSource =
+        sameInode && typeof prev?.usageSource === "string" ? prev.usageSource : null;
+
+      result = await parseAntigravityFile({
+        filePath,
+        lastLine,
+        initialContextTokens,
+        initialPrevContext,
+        initialModel,
+        initialLastPlannerModel,
+        initialUsageSource,
+        hourlyState,
+        touchedBuckets,
+        source: fileSource,
+        projectState,
+        projectTouchedBuckets,
+        projectRef,
+        projectKey,
+      });
+
+      const mergedContributions = { ...(prev?.contributions || {}) };
+      for (const [cKey, cVal] of Object.entries(result.contributions || {})) {
+        if (!mergedContributions[cKey]) {
+          mergedContributions[cKey] = { ...cVal, totals: { ...cVal.totals } };
+        } else {
+          addTotals(mergedContributions[cKey].totals, cVal.totals);
+        }
+      }
+      result.contributions = mergedContributions;
+    }
 
     cursors.files[key] = {
       inode,
       size,
       mtimeMs,
+      dbMtimeMs,
+      dbSize,
+      cursorVersion: ANTIGRAVITY_CURSOR_VERSION,
       lastLine: result.lastLine,
       contextTokens: result.contextTokens,
       previousContextTokens: result.previousContextTokens,
       currentModel: result.currentModel,
       lastPlannerModel: result.lastPlannerModel,
       usageSource: result.usageSource,
+      contributions: result.contributions,
       updatedAt: new Date().toISOString(),
     };
 
@@ -18914,7 +19011,11 @@ function readAntigravityConversationDb(dbPath) {
 
 async function parseAntigravityFile({
   filePath,
-  lastLine,
+  lastLine = 0,
+  maxLine = null,
+  watermarkLine = 0,
+  legacyMode = false,
+  applyBuckets = true,
   initialContextTokens,
   initialPrevContext,
   initialModel,
@@ -18938,14 +19039,21 @@ async function parseAntigravityFile({
       currentModel: null,
       lastPlannerModel: null,
       usageSource: "estimated",
+      contributions: {},
     };
   }
 
-  const lines = raw
+  const allLines = raw
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+  const endLimit =
+    Number.isFinite(maxLine) && maxLine >= 0
+      ? Math.min(allLines.length, maxLine)
+      : allLines.length;
+  const lines = allLines.slice(0, endLimit);
   let eventsAggregated = 0;
+  const contributions = {};
   const dbPath = resolveAntigravityDbPath(filePath);
   const stepMap = dbPath ? readAntigravityConversationDb(dbPath) : null;
   // Resume cached context-token total + model so historical lines (i < lastLine)
@@ -19008,7 +19116,7 @@ async function parseAntigravityFile({
 
     if (!isNewEvent) {
       if (parsed.type === "PLANNER_RESPONSE") {
-        if (dbTurn?.hasUsageMetadata) {
+        if (!legacyMode && dbTurn?.hasUsageMetadata) {
           contextTokens = (dbTurn.uncachedInput || 0) + (dbTurn.cachedInput || 0);
         } else if (dbContextTokens > 0) {
           contextTokens = dbContextTokens;
@@ -19042,7 +19150,7 @@ async function parseAntigravityFile({
     let billedPlanner = false;
 
     if (parsed.type === "PLANNER_RESPONSE") {
-      if (dbTurn?.hasUsageMetadata) {
+      if (!legacyMode && dbTurn?.hasUsageMetadata) {
         const uncached = dbTurn.uncachedInput || 0;
         const cached = dbTurn.cachedInput || 0;
         const reasoning = dbTurn.reasoningOutput || 0;
@@ -19095,22 +19203,43 @@ async function parseAntigravityFile({
       continue;
     }
 
-    const bucket = getHourlyBucket(hourlyState, source, model, bucketStart);
-    addTotals(bucket.totals, delta);
-    touchedBuckets.add(bucketKey(source, model, bucketStart));
-
-    if (projectKey && projectState && projectTouchedBuckets) {
-      const projectBucket = getProjectBucket(
-        projectState,
-        projectKey,
+    const cKey = `${source}|${model}|${bucketStart}|${projectKey || ""}`;
+    if (!contributions[cKey]) {
+      contributions[cKey] = {
         source,
+        model,
         bucketStart,
-        projectRef,
-      );
-      addTotals(projectBucket.totals, delta);
-      projectTouchedBuckets.add(projectBucketKey(projectKey, source, bucketStart));
+        projectKey: projectKey || null,
+        projectRef: projectRef || null,
+        totals: initTotals(),
+      };
     }
-    eventsAggregated += 1;
+    addTotals(contributions[cKey].totals, delta);
+
+    if (applyBuckets !== false && hourlyState && touchedBuckets) {
+      const bucket = getHourlyBucket(hourlyState, source, model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey(source, model, bucketStart));
+
+      if (projectKey && projectState && projectTouchedBuckets) {
+        const projectBucket = getProjectBucket(
+          projectState,
+          projectKey,
+          source,
+          bucketStart,
+          projectRef,
+        );
+        addTotals(projectBucket.totals, delta);
+        projectTouchedBuckets.add(projectBucketKey(projectKey, source, bucketStart));
+      }
+    }
+    const isNewForCounter =
+      watermarkLine > 0 && lines.length > watermarkLine
+        ? i >= watermarkLine
+        : true;
+    if (isNewForCounter) {
+      eventsAggregated += 1;
+    }
     // Snapshot the pre-planner context first. The planner's own content+tool_calls
     // (eventContextTokens, added below) become part of the next turn's history,
     // so they MUST be billed as input on the next planner — don't fold them into
@@ -19129,6 +19258,7 @@ async function parseAntigravityFile({
     currentModel,
     lastPlannerModel,
     usageSource: stepMap ? "sqlite" : "estimated",
+    contributions,
   };
 }
 
@@ -20705,6 +20835,7 @@ module.exports = {
   parseGrokBuildIncremental,
 
   // Antigravity (Google Gemini) - Session logs parser
+  ANTIGRAVITY_CURSOR_VERSION,
   resolveAntigravityBrainDirs,
   listAntigravitySessionFiles,
   listAntigravityTranscripts,
