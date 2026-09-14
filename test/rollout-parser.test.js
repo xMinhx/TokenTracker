@@ -64,6 +64,7 @@ const {
   ANTIGRAVITY_CURSOR_VERSION,
   parseAntigravityIncremental,
   listAntigravitySessionFiles,
+  listAntigravityTranscriptsWithStatus,
   estimateAntigravityTokens,
   resolveAntigravityDbPath,
   extractAntigravityGenInfo,
@@ -12205,6 +12206,18 @@ test("listAntigravitySessionFiles discovers transcripts across sibling 2.0 brain
 
     assert.deepEqual(all.sort(), [cliTranscript, ideTranscript, legacyTranscript].sort());
     assert.deepEqual(results[3], []);
+
+    const inventory = await listAntigravityTranscriptsWithStatus(tmp);
+    assert.deepEqual(inventory.files.sort(), all.sort());
+    assert.equal(inventory.complete, true);
+
+    await fs.rm(path.join(tmp, "antigravity-cli"), { recursive: true, force: true });
+    const partialInventory = await listAntigravityTranscriptsWithStatus(
+      tmp,
+      new Set([cliTranscript]),
+    );
+    assert.deepEqual(partialInventory.files.sort(), [legacyTranscript, ideTranscript].sort());
+    assert.equal(partialInventory.complete, false);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -14198,6 +14211,112 @@ test("parseAntigravityIncremental rebuilds when an incomplete ledger meets a SQL
     assert.equal(third.eventsAggregated, 0);
     assert.equal(third.bucketsQueued, 0);
     assert.equal((await readJsonLines(queuePath)).length, queued.length);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseAntigravityIncremental defers incomplete-ledger rebuilds for partial discovery", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-partial-discovery-"));
+  try {
+    const lines = antigravityPlannerLines([
+      {
+        userStep: 0,
+        userAt: "2026-04-05T14:00:00.000Z",
+        userContent: "hello",
+        plannerStep: 1,
+        plannerAt: "2026-04-05T14:01:00.000Z",
+        plannerContent: "response",
+        thinking: "reasoning",
+      },
+    ]);
+    const first = await setupAntigravitySqliteSession(tmp, {
+      convId: "conv-partial-a",
+      protos: [
+        buildAntigravityTestProto({
+          model: "gemini-3.8-flash",
+          lastStepIndex: 0,
+          uncachedInput: 1000,
+          cachedInput: 2000,
+          outputTokens: 200,
+          textOutput: 150,
+          reasoningOutput: 50,
+        }),
+      ],
+      lines,
+    });
+    const second = await setupAntigravitySqliteSession(tmp, {
+      convId: "conv-partial-b",
+      protos: [
+        buildAntigravityTestProto({
+          model: "gemini-3.8-flash",
+          lastStepIndex: 0,
+          uncachedInput: 500,
+          cachedInput: 300,
+          outputTokens: 40,
+          textOutput: 30,
+          reasoningOutput: 10,
+        }),
+      ],
+      lines,
+    });
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    await parseAntigravityIncremental({
+      sessionFiles: [first.transcriptPath, second.transcriptPath],
+      cursors,
+      queuePath: first.queuePath,
+    });
+    const queueBefore = await readJsonLines(first.queuePath);
+    assert.equal(queueBefore.at(-1).cached_input_tokens, 2300);
+    cursors.files[first.transcriptPath].contributionsComplete = false;
+
+    const updatedProto = buildAntigravityTestProto({
+      model: "gemini-3.8-flash",
+      lastStepIndex: 0,
+      uncachedInput: 1000,
+      cachedInput: 4000,
+      outputTokens: 200,
+      textOutput: 150,
+      reasoningOutput: 50,
+    });
+    sqliteCli.execFileSync("sqlite3", [
+      first.dbPath,
+      `UPDATE gen_metadata SET data = X'${updatedProto.toString("hex")}' WHERE idx = 0;`,
+    ]);
+    const futureDate = new Date(Date.now() + 2000);
+    await fs.utimes(first.dbPath, futureDate, futureDate);
+
+    // An incomplete inventory must not trigger a source-wide reset: the second
+    // session is omitted from this scan and its exact usage must remain intact.
+    const deferred = await parseAntigravityIncremental({
+      sessionFiles: [first.transcriptPath],
+      cursors,
+      queuePath: first.queuePath,
+      inventoryComplete: false,
+    });
+    assert.equal(deferred.eventsAggregated, 0);
+    assert.equal(deferred.bucketsQueued, 0);
+    assert.ok(cursors.files[second.transcriptPath]);
+    assert.equal((await readJsonLines(first.queuePath)).length, queueBefore.length);
+    assert.equal(
+      cursors.hourly.buckets[Object.keys(cursors.hourly.buckets)[0]].totals.cached_input_tokens,
+      2300,
+    );
+
+    // Once the caller supplies a complete inventory, the deferred correction
+    // can safely rebuild and reconcile both sessions.
+    const repaired = await parseAntigravityIncremental({
+      sessionFiles: [first.transcriptPath, second.transcriptPath],
+      cursors,
+      queuePath: first.queuePath,
+      inventoryComplete: true,
+    });
+    assert.equal(repaired.eventsAggregated, 0);
+    assert.equal(repaired.bucketsQueued, 1);
+    const latest = (await readJsonLines(first.queuePath)).at(-1);
+    assert.equal(latest.cached_input_tokens, 4300);
+    assert.ok(cursors.files[second.transcriptPath]);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

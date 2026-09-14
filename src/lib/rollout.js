@@ -19198,27 +19198,77 @@ function resolveAntigravityBrainDirs(geminiHome) {
   ];
 }
 
-async function listAntigravitySessionFiles(brainDir) {
+function antigravityPathWithin(filePath, root) {
+  if (typeof filePath !== "string" || typeof root !== "string") return false;
+  const relative = path.relative(root, filePath);
+  return Boolean(
+    relative &&
+      relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative),
+  );
+}
+
+async function listAntigravitySessionFilesWithStatus(brainDir, knownFiles = null) {
   const out = [];
-  if (!brainDir || typeof brainDir !== "string") return out;
-  const entries = await safeReadDir(brainDir).catch(() => []);
+  const known = knownFiles instanceof Set ? knownFiles : new Set(knownFiles || []);
+  if (!brainDir || typeof brainDir !== "string") {
+    return { files: out, complete: false };
+  }
+
+  let entries;
+  try {
+    entries = await fs.readdir(brainDir, { withFileTypes: true });
+  } catch (err) {
+    // A missing optional install directory is an authoritative empty inventory
+    // only when it has never contained a tracked session. If it has, the
+    // directory may be temporarily unavailable and must not trigger retraction.
+    return {
+      files: out,
+      complete:
+        err?.code === "ENOENT" &&
+        !Array.from(known).some((filePath) => antigravityPathWithin(filePath, brainDir)),
+    };
+  }
+
+  let complete = true;
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const logsDir = path.join(brainDir, entry.name, ".system_generated", "logs");
     const transcriptPath = path.join(logsDir, "transcript.jsonl");
-    const st = await fs.stat(transcriptPath).catch(() => null);
-    if (st && st.isFile()) {
-      out.push(transcriptPath);
+    let st;
+    try {
+      st = await fs.stat(transcriptPath);
+    } catch (err) {
+      // ENOENT means this session directory currently has no transcript (or
+      // the transcript was deleted). Other errors make the scan incomplete.
+      if (err?.code !== "ENOENT") complete = false;
+      continue;
     }
+    if (st.isFile()) out.push(transcriptPath);
   }
+
   out.sort((a, b) => a.localeCompare(b));
-  return out;
+  return { files: out, complete };
+}
+
+async function listAntigravitySessionFiles(brainDir) {
+  return (await listAntigravitySessionFilesWithStatus(brainDir)).files;
+}
+
+async function listAntigravityTranscriptsWithStatus(geminiHome, knownFiles = null) {
+  const dirs = resolveAntigravityBrainDirs(geminiHome);
+  const results = await Promise.all(
+    dirs.map((dir) => listAntigravitySessionFilesWithStatus(dir, knownFiles)),
+  );
+  return {
+    files: results.flatMap((result) => result.files),
+    complete: results.every((result) => result.complete),
+  };
 }
 
 async function listAntigravityTranscripts(geminiHome) {
-  const dirs = resolveAntigravityBrainDirs(geminiHome);
-  const lists = await Promise.all(dirs.map((dir) => listAntigravitySessionFiles(dir)));
-  return lists.flat();
+  return (await listAntigravityTranscriptsWithStatus(geminiHome)).files;
 }
 
 const ANTIGRAVITY_CURSOR_VERSION = 2;
@@ -19373,6 +19423,10 @@ async function parseAntigravityIncremental({
   onProgress,
   source,
   publicRepoResolver,
+  // Source-wide rebuilds may retract sessions absent from sessionFiles. Only
+  // permit that when discovery explicitly completed; direct parser callers
+  // retain the historical complete-inventory default for compatibility.
+  inventoryComplete = true,
 }) {
   await ensureDir(path.dirname(queuePath));
   let filesProcessed = 0;
@@ -19464,7 +19518,11 @@ async function parseAntigravityIncremental({
     if (!st || !st.isFile()) missingLegacyPaths.push(filePath);
   }
   const preserveUnknownLegacyAggregate = missingLegacyPaths.length > 0;
-  if (legacyMigrationPaths.size > 0 && !preserveUnknownLegacyAggregate) {
+  if (
+    inventoryComplete &&
+    legacyMigrationPaths.size > 0 &&
+    !preserveUnknownLegacyAggregate
+  ) {
     needsFullRebuild = true;
   }
 
@@ -19481,12 +19539,17 @@ async function parseAntigravityIncremental({
 
   // A capped contribution ledger is safe while its transcript/SQLite identity
   // is unchanged. If an incomplete ledger needs reconciliation, rebuild the
-  // complete source baseline before applying any per-file deltas.
+  // complete source baseline before applying any per-file deltas. When source
+  // discovery is incomplete, defer the file instead: resetting the source
+  // would erase contributions belonging to sessions omitted by discovery.
   if (!needsFullRebuild && incompleteContributionPaths.size > 0) {
     for (const filePath of incompleteContributionPaths) {
       if (!liveFilePaths.has(filePath)) {
-        if (preserveUnknownLegacyAggregate) deferredIncompletePaths.add(filePath);
-        else needsFullRebuild = true;
+        if (!inventoryComplete || preserveUnknownLegacyAggregate) {
+          deferredIncompletePaths.add(filePath);
+        } else {
+          needsFullRebuild = true;
+        }
         if (needsFullRebuild) break;
         continue;
       }
@@ -19518,8 +19581,11 @@ async function parseAntigravityIncremental({
         projectChanged = antigravityProjectAssignmentChanged(prev, projectContext);
       }
       if (!transcriptCanAppend || !sameDb || !sameSource || projectChanged) {
-        if (preserveUnknownLegacyAggregate) deferredIncompletePaths.add(filePath);
-        else needsFullRebuild = true;
+        if (!inventoryComplete || preserveUnknownLegacyAggregate) {
+          deferredIncompletePaths.add(filePath);
+        } else {
+          needsFullRebuild = true;
+        }
         if (needsFullRebuild) break;
       }
     }
@@ -22626,6 +22692,7 @@ module.exports = {
   resolveAntigravityBrainDirs,
   listAntigravitySessionFiles,
   listAntigravityTranscripts,
+  listAntigravityTranscriptsWithStatus,
   parseAntigravityIncremental,
   estimateAntigravityTokens,
   isCjkCodePoint,
