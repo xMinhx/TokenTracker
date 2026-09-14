@@ -13699,7 +13699,10 @@ test("parseAntigravityIncremental migrates a legacy cursor with an appended tran
       lines,
     });
 
-    const st = await fs.stat(transcriptPath);
+    // Keep the legacy snapshot and the subsequent rewrite on one open handle;
+    // this avoids a path-based stat/write race in the fixture itself.
+    const transcriptFile = await fs.open(transcriptPath, "r+");
+    const st = await transcriptFile.stat();
     // Simulate v0.96.2 after one planner was counted, then append a transcript
     // line before the first sync on the upgraded parser.
     const cursors = {
@@ -13748,10 +13751,12 @@ test("parseAntigravityIncremental migrates a legacy cursor with an appended tran
         content: "next prompt",
       },
     ];
-    await fs.writeFile(
-      transcriptPath,
-      appendedLines.map((line) => JSON.stringify(line)).join("\n"),
-    );
+    try {
+      await transcriptFile.truncate(0);
+      await transcriptFile.writeFile(appendedLines.map((line) => JSON.stringify(line)).join("\n"), "utf8");
+    } finally {
+      await transcriptFile.close();
+    }
 
     const first = await parseAntigravityIncremental({
       sessionFiles: [transcriptPath],
