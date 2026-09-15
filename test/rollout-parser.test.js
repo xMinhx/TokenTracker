@@ -13840,7 +13840,7 @@ test("parseAntigravityIncremental does not commit state when queue append fails"
   }
 });
 
-test("parseAntigravityIncremental preserves missing legacy transcript totals during migration", async () => {
+test("parseAntigravityIncremental defers a changed legacy session when another legacy session is missing", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-legacy-missing-"));
   try {
     const firstLines = antigravityPlannerLines([
@@ -13900,10 +13900,12 @@ test("parseAntigravityIncremental preserves missing legacy transcript totals dur
 
     const firstStat = await fs.stat(first.transcriptPath);
     const secondStat = await fs.stat(second.transcriptPath);
-    // The migration baseline intentionally uses transcript-only v0.96.2
-    // semantics; current SQLite metadata is not safe to use for subtraction.
-    const oldInput =
-      antigravityTestTokens("first") + antigravityTestTokens("second");
+    // v0.96.2 used Field 9 context totals for billed input when available.
+    // A partial migration cannot reconstruct that file-level contribution
+    // safely because the current SQLite metadata may have changed since it
+    // was recorded, so the aggregate must stay untouched until every legacy
+    // session is available for a source-wide rebuild.
+    const oldInput = 1000 + 500;
     const oldOutput =
       antigravityTestTokens("response") + antigravityTestTokens("reply");
     const oldReasoning =
@@ -13990,9 +13992,29 @@ test("parseAntigravityIncremental preserves missing legacy transcript totals dur
     );
     const projectQueuePath = path.join(tmp, "project.queue.jsonl");
 
-    // The scan temporarily loses the second transcript, so its old aggregate
-    // must remain while the live transcript is upgraded to exact metadata.
+    // The scan temporarily loses the second transcript while the live one
+    // grows. The live file must not be selectively upgraded: its old per-file
+    // contribution is unknown.
     await fs.rm(second.transcriptPath);
+    const appendedFirstLines = [
+      ...firstLines,
+      ...antigravityPlannerLines([
+        {
+          userStep: 2,
+          userAt: "2026-04-05T14:04:00.000Z",
+          userContent: "later",
+          plannerStep: 3,
+          plannerAt: "2026-04-05T14:05:00.000Z",
+          plannerContent: "later reply",
+          thinking: "later thought",
+        },
+      ]),
+    ];
+    await fs.writeFile(
+      first.transcriptPath,
+      appendedFirstLines.map((line) => JSON.stringify(line)).join("\n"),
+      "utf8",
+    );
     const result = await parseAntigravityIncremental({
       sessionFiles: [first.transcriptPath],
       cursors,
@@ -14000,20 +14022,25 @@ test("parseAntigravityIncremental preserves missing legacy transcript totals dur
       projectQueuePath,
     });
     assert.equal(result.eventsAggregated, 0);
-    assert.equal(result.bucketsQueued, 1);
-
-    const queued = await readJsonLines(first.queuePath);
-    const latest = queued.at(-1);
-    assert.equal(
-      latest.input_tokens,
-      oldInput - antigravityTestTokens("first") + 1000,
+    assert.equal(result.bucketsQueued, 0);
+    assert.equal(result.projectBucketsQueued, 0);
+    assert.equal(fssync.existsSync(first.queuePath), false);
+    assert.deepEqual(
+      cursors.hourly.buckets[aggregateKey].totals,
+      {
+        input_tokens: oldInput,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        output_tokens: oldOutput,
+        reasoning_output_tokens: oldReasoning,
+        total_tokens: oldTotal,
+        billable_total_tokens: oldTotal,
+        total_cost_usd: 0,
+        conversation_count: 2,
+      },
     );
-    assert.equal(latest.cached_input_tokens, 2000);
-    assert.equal(latest.output_tokens, 150 + antigravityTestTokens("reply"));
-    assert.equal(latest.reasoning_output_tokens, 50 + antigravityTestTokens("think"));
-    assert.equal(latest.conversation_count, 2);
     assert.equal(cursors.files[second.transcriptPath].cursorVersion, undefined);
-    assert.equal(cursors.files[first.transcriptPath].projectReconciliationDeferred, true);
+    assert.equal(cursors.files[first.transcriptPath].cursorVersion, undefined);
     assert.deepEqual(
       cursors.projectHourly.buckets[projectAggregateKey].totals,
       projectTotalsBefore,
