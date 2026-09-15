@@ -19625,6 +19625,24 @@ async function parseAntigravityIncremental({
     const key = filePath;
     if (deferredIncompletePaths.has(key)) continue;
     const prev = fileCursors[key] || null;
+    // A legacy cursor has no verifiable per-file contribution. If any legacy
+    // transcript is missing, subtracting a reconstructed value can corrupt
+    // the aggregate because v0.96.2 may have billed its SQLite context value.
+    // Wait for a complete inventory, then rebuild the source from scratch.
+    if (preserveUnknownLegacyAggregate && legacyMigrationPaths.has(key)) {
+      filesProcessed += 1;
+      if (cb) {
+        cb({
+          index: idx + 1,
+          total: totalFiles,
+          filePath,
+          filesProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+      continue;
+    }
     const inode = st.ino || 0;
     const size = Number.isFinite(st.size) ? st.size : 0;
     const mtimeMs = Number.isFinite(st.mtimeMs) ? st.mtimeMs : 0;
