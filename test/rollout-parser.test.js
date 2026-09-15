@@ -13898,8 +13898,6 @@ test("parseAntigravityIncremental defers a changed legacy session when another l
       lines: secondLines,
     });
 
-    const firstStat = await fs.stat(first.transcriptPath);
-    const secondStat = await fs.stat(second.transcriptPath);
     // v0.96.2 used Field 9 context totals for billed input when available.
     // A partial migration cannot reconstruct that file-level contribution
     // safely because the current SQLite metadata may have changed since it
@@ -13916,10 +13914,10 @@ test("parseAntigravityIncremental defers a changed legacy session when another l
       "gemini-3.8-flash",
       "2026-04-05T14:00:00.000Z",
     );
-    const legacyFile = (st, lines, contextTokens) => ({
-      inode: st.ino || 0,
-      size: st.size,
-      mtimeMs: st.mtimeMs,
+    const legacyFile = (lines, contextTokens) => ({
+      inode: 0,
+      size: lines.length,
+      mtimeMs: 0,
       lastLine: lines.length,
       contextTokens,
       previousContextTokens: 0,
@@ -13948,8 +13946,8 @@ test("parseAntigravityIncremental defers a changed legacy session when another l
     const cursors = {
       version: 1,
       files: {
-        [first.transcriptPath]: legacyFile(firstStat, firstLines, 1000),
-        [second.transcriptPath]: legacyFile(secondStat, secondLines, 500),
+        [first.transcriptPath]: legacyFile(firstLines, 1000),
+        [second.transcriptPath]: legacyFile(secondLines, 500),
       },
       hourly: {
         version: 3,
