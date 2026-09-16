@@ -19337,6 +19337,15 @@ async function statAntigravityDatabase(dbPath) {
   return result;
 }
 
+// Neither the transcript nor the database changes when the extractor does, so
+// without this stamp a session read before an extractor fix keeps its totals.
+// Every place that asks whether a cursor's totals are current must use this.
+function antigravityExtractorStale(previous, dbPath) {
+  return Boolean(
+    dbPath && previous && previous.extractorRevision !== ANTIGRAVITY_EXTRACTOR_REVISION,
+  );
+}
+
 function sameAntigravityDatabase(previous, current) {
   if (!previous || !current) return false;
   // SQLite updates the -shm read marks when a reader opens a WAL database.
@@ -19573,6 +19582,7 @@ async function parseAntigravityIncremental({
         !fileSourceByPath.has(filePath) ||
         (prev.source == null ? defaultSource : prev.source) === fileSourceByPath.get(filePath);
       const sameDb = sameAntigravityDatabase(prev, dbIdentity);
+      const staleExtractor = antigravityExtractorStale(prev, dbPath);
       let projectChanged = false;
       if (preflightProjectState) {
         const projectContext = await resolveProjectContextForFile({
@@ -19584,7 +19594,7 @@ async function parseAntigravityIncremental({
         });
         projectChanged = antigravityProjectAssignmentChanged(prev, projectContext);
       }
-      if (!transcriptCanAppend || !sameDb || !sameSource || projectChanged) {
+      if (!transcriptCanAppend || !sameDb || staleExtractor || !sameSource || projectChanged) {
         if (!inventoryComplete || preserveUnknownLegacyAggregate) {
           deferredIncompletePaths.add(filePath);
         } else {
@@ -19665,11 +19675,7 @@ async function parseAntigravityIncremental({
     const sameSource =
       !prev || (prev.source == null ? defaultSource : prev.source) === fileSource;
     const currentVersion = prev && prev.cursorVersion === ANTIGRAVITY_CURSOR_VERSION;
-    // Neither the transcript nor the database changes when the extractor does,
-    // so without this stamp a session read before a fix keeps its totals forever.
-    const staleExtractor = Boolean(
-      dbPath && prev && prev.extractorRevision !== ANTIGRAVITY_EXTRACTOR_REVISION,
-    );
+    const staleExtractor = antigravityExtractorStale(prev, dbPath);
     let transcriptBytes = null;
     let transcriptHash = typeof prev?.transcriptHash === "string" ? prev.transcriptHash : null;
     let sameTranscriptContent = sameTranscriptStats;
@@ -20123,8 +20129,8 @@ function findAntigravityProtoFields(buf) {
     if (fieldNum <= 0) throw new RangeError("invalid Antigravity protobuf field number");
     if (wireType === 0) {
       // Values past 2^53 stay BigInt. Every token count is read through
-      // Number.isFinite, which rejects a BigInt, so an out-of-range value is
-      // dropped instead of being billed.
+      // Number.isSafeInteger, which rejects a BigInt, so an out-of-range value
+      // is dropped instead of being billed.
       const [val, vNext] = decodeAntigravityVarint(buf, offset);
       offset = vNext;
       fields.push({ num: fieldNum, val });
@@ -20166,7 +20172,7 @@ function extractAntigravityGenInfo(buf) {
       const f10 = findAntigravityProtoFields(f9).find((f) => f.num === 10)?.val;
       if (f10) {
         const tok = findAntigravityProtoFields(f10).find((f) => f.num === 1)?.val;
-        if (Number.isFinite(tok)) contextTokens = tok;
+        if (Number.isSafeInteger(tok)) contextTokens = tok;
       }
     }
 
@@ -20209,21 +20215,21 @@ function extractAntigravityGenInfo(buf) {
       const tTok = f4fields.find((f) => f.num === 9)?.val;
       const rTok = f4fields.find((f) => f.num === 10)?.val;
       if (
-        Number.isFinite(sTok) ||
-        Number.isFinite(pTok) ||
-        Number.isFinite(cTok) ||
-        Number.isFinite(oTok) ||
-        Number.isFinite(tTok) ||
-        Number.isFinite(rTok)
+        Number.isSafeInteger(sTok) ||
+        Number.isSafeInteger(pTok) ||
+        Number.isSafeInteger(cTok) ||
+        Number.isSafeInteger(oTok) ||
+        Number.isSafeInteger(tTok) ||
+        Number.isSafeInteger(rTok)
       ) {
         hasUsageMetadata = true;
-        const sysTokens = Number.isFinite(sTok) ? sTok : 0;
-        const promptTokens = Number.isFinite(pTok) ? pTok : 0;
+        const sysTokens = Number.isSafeInteger(sTok) ? sTok : 0;
+        const promptTokens = Number.isSafeInteger(pTok) ? pTok : 0;
         uncachedInput = sysTokens + promptTokens;
-        cachedInput = Number.isFinite(cTok) ? cTok : 0;
-        outputTokens = Number.isFinite(oTok) ? oTok : 0;
-        textOutput = Number.isFinite(tTok) ? tTok : 0;
-        reasoningOutput = Number.isFinite(rTok) ? rTok : 0;
+        cachedInput = Number.isSafeInteger(cTok) ? cTok : 0;
+        outputTokens = Number.isSafeInteger(oTok) ? oTok : 0;
+        textOutput = Number.isSafeInteger(tTok) ? tTok : 0;
+        reasoningOutput = Number.isSafeInteger(rTok) ? rTok : 0;
       }
     }
 

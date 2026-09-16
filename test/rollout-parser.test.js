@@ -14654,6 +14654,94 @@ test("parseAntigravityIncremental corrects a session synced before the extractor
   }
 });
 
+test("parseAntigravityIncremental rebuilds a capped ledger synced before the extractor fix", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-extractor-capped-"));
+  try {
+    const proto = encodeAntigravityTestLd(
+      1,
+      Buffer.concat([
+        encodeAntigravityTestLd(19, "gemini-3.8-flash"),
+        encodeAntigravityTestLd(
+          9,
+          Buffer.concat([
+            encodeAntigravityTestTag(2, 0),
+            ANTIGRAVITY_UINT64_MAX_VARINT,
+            encodeAntigravityTestLd(10, encodeAntigravityTestVi(1, 3200)),
+          ]),
+        ),
+        encodeAntigravityTestLd(
+          4,
+          Buffer.concat([
+            encodeAntigravityTestVi(2, 1000),
+            encodeAntigravityTestVi(3, 200),
+            encodeAntigravityTestVi(5, 2000),
+            encodeAntigravityTestVi(9, 150),
+            encodeAntigravityTestVi(10, 50),
+          ]),
+        ),
+        antigravityStepIndexField(0),
+      ]),
+    );
+    const { transcriptPath, queuePath } = await setupAntigravitySqliteSession(tmp, {
+      protos: [proto],
+      lines: antigravityPlannerLines([
+        {
+          userStep: 0,
+          userAt: "2026-04-05T14:00:00.000Z",
+          userContent: "hello",
+          plannerStep: 1,
+          plannerAt: "2026-04-05T14:01:00.000Z",
+          plannerContent: "response",
+          thinking: "reasoning",
+        },
+      ]),
+    });
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
+
+    // A pre-fix cursor whose ledger reached ANTIGRAVITY_MAX_CONTRIBUTIONS: the
+    // 13:00 bucket is still in the aggregate but no longer tracked for this file,
+    // and the cursor predates the extractor revision. Nothing on disk changed.
+    cursors.files[transcriptPath].contributionsComplete = false;
+    delete cursors.files[transcriptPath].extractorRevision;
+    const stale = bucketKey("antigravity", "gemini-3.8-flash", "2026-04-05T13:00:00.000Z");
+    cursors.hourly.buckets[stale] = {
+      totals: {
+        input_tokens: 90,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        output_tokens: 10,
+        reasoning_output_tokens: 0,
+        total_tokens: 100,
+        billable_total_tokens: 100,
+        total_cost_usd: 0,
+        conversation_count: 1,
+      },
+      queuedKey: null,
+    };
+
+    await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
+
+    // Subtracting only the retained contribution would leave 13:00 in place.
+    // A stale extractor has to rebuild the source, as a database change does.
+    assert.equal(cursors.hourly.buckets[stale]?.totals?.total_tokens ?? 0, 0, "the untracked bucket is cleared");
+    const latest = new Map();
+    for (const row of await readJsonLines(queuePath)) latest.set(`${row.model}|${row.hour_start}`, row);
+    assert.equal(latest.get("gemini-3.8-flash|2026-04-05T14:00:00.000Z").total_tokens, 3200);
+
+    const rows = (await readJsonLines(queuePath)).length;
+    const again = await parseAntigravityIncremental({
+      sessionFiles: [transcriptPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(again.bucketsQueued, 0, "the rebuild runs once");
+    assert.equal((await readJsonLines(queuePath)).length, rows);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseAntigravityIncremental rebuilds capped ledgers when project attribution changes", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-project-cap-"));
   try {
