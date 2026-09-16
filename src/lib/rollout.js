@@ -19272,6 +19272,10 @@ async function listAntigravityTranscripts(geminiHome) {
 }
 
 const ANTIGRAVITY_CURSOR_VERSION = 2;
+// Bump when extractAntigravityGenInfo starts reading records it used to
+// discard. Kept apart from the cursor version: a cursor-version mismatch routes
+// to the legacy migration, which treats the cursor as having no per-file ledger.
+const ANTIGRAVITY_EXTRACTOR_REVISION = 1;
 const ANTIGRAVITY_MAX_CONTRIBUTIONS = 4096;
 
 function hashAntigravityTranscript(buffer) {
@@ -19661,6 +19665,11 @@ async function parseAntigravityIncremental({
     const sameSource =
       !prev || (prev.source == null ? defaultSource : prev.source) === fileSource;
     const currentVersion = prev && prev.cursorVersion === ANTIGRAVITY_CURSOR_VERSION;
+    // Neither the transcript nor the database changes when the extractor does,
+    // so without this stamp a session read before a fix keeps its totals forever.
+    const staleExtractor = Boolean(
+      dbPath && prev && prev.extractorRevision !== ANTIGRAVITY_EXTRACTOR_REVISION,
+    );
     let transcriptBytes = null;
     let transcriptHash = typeof prev?.transcriptHash === "string" ? prev.transcriptHash : null;
     let sameTranscriptContent = sameTranscriptStats;
@@ -19732,6 +19741,7 @@ async function parseAntigravityIncremental({
       (metadataRetryNeeded ||
         !currentVersion ||
         !sameDb ||
+        staleExtractor ||
         projectChanged ||
         (!sameTranscriptContent && !transcriptCanAppend));
     if (deferIncompleteReconciliation) continue;
@@ -19741,6 +19751,7 @@ async function parseAntigravityIncremental({
       sameDb &&
       sameSource &&
       currentVersion &&
+      !staleExtractor &&
       !metadataRetryNeeded &&
       !projectChanged &&
       !needsFullRebuild
@@ -19772,6 +19783,7 @@ async function parseAntigravityIncremental({
         metadataRetryNeeded ||
         !currentVersion ||
         !sameDb ||
+        staleExtractor ||
         !sameSource ||
         projectChanged ||
         (!sameTranscriptContent && !transcriptCanAppend));
@@ -20028,6 +20040,7 @@ async function parseAntigravityIncremental({
       projectConfigSize: deferProjectReconciliation ? null : projectContext?.configSize ?? null,
       projectReconciliationDeferred: deferProjectReconciliation,
       cursorVersion: ANTIGRAVITY_CURSOR_VERSION,
+      extractorRevision: ANTIGRAVITY_EXTRACTOR_REVISION,
       lastLine: result.lastLine,
       contextTokens: result.contextTokens,
       previousContextTokens: result.previousContextTokens,
@@ -20074,15 +20087,25 @@ function decodeAntigravityVarint(buf, offset) {
   if (!Buffer.isBuffer(buf) || !Number.isSafeInteger(offset) || offset < 0) {
     throw new RangeError("invalid Antigravity protobuf offset");
   }
+  const start = offset;
   let res = 0;
   for (let count = 0; count < 10; count++) {
     if (offset >= buf.length) throw new RangeError("truncated Antigravity protobuf varint");
     const b = buf[offset++];
+    // 64 bits is nine 7-bit groups plus one bit of a tenth byte.
+    if (count === 9 && b > 1) throw new RangeError("Antigravity protobuf varint exceeds 64 bits");
     res += (b & 0x7f) * 2 ** (count * 7);
-    if (!Number.isSafeInteger(res)) {
-      throw new RangeError("unsafe Antigravity protobuf varint");
+    if (!(b & 0x80)) {
+      if (Number.isSafeInteger(res)) return [res, offset];
+      // Antigravity writes 2^64 - 1 in fields the extractor never reads. The
+      // float sum above has already lost precision, so re-read the bytes into a
+      // BigInt rather than returning a rounded or saturated number.
+      let exact = 0n;
+      for (let i = start; i < offset; i++) {
+        exact |= BigInt(buf[i] & 0x7f) << BigInt((i - start) * 7);
+      }
+      return [exact, offset];
     }
-    if (!(b & 0x80)) return [res, offset];
   }
   throw new RangeError("overlong Antigravity protobuf varint");
 }
@@ -20093,18 +20116,22 @@ function findAntigravityProtoFields(buf) {
   let offset = 0;
   while (offset < buf.length) {
     const [tag, next] = decodeAntigravityVarint(buf, offset);
+    if (typeof tag !== "number") throw new RangeError("unsafe Antigravity protobuf field tag");
     offset = next;
     const fieldNum = Math.floor(tag / 8);
     const wireType = tag & 7;
     if (fieldNum <= 0) throw new RangeError("invalid Antigravity protobuf field number");
     if (wireType === 0) {
+      // Values past 2^53 stay BigInt. Every token count is read through
+      // Number.isFinite, which rejects a BigInt, so an out-of-range value is
+      // dropped instead of being billed.
       const [val, vNext] = decodeAntigravityVarint(buf, offset);
       offset = vNext;
       fields.push({ num: fieldNum, val });
     } else if (wireType === 2) {
       const [len, lNext] = decodeAntigravityVarint(buf, offset);
       offset = lNext;
-      if (len > buf.length - offset) {
+      if (typeof len !== "number" || len > buf.length - offset) {
         throw new RangeError("truncated Antigravity protobuf field");
       }
       fields.push({ num: fieldNum, val: buf.subarray(offset, offset + len) });
