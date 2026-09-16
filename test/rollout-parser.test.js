@@ -12720,9 +12720,7 @@ test("extractAntigravityGenInfo rejects malformed protobuf varints", () => {
   assert.equal(extractAntigravityGenInfo(Buffer.from([0x0a, 0x80, 0x80, 0x80])), null);
 });
 
-// Ten bytes copied from a real Antigravity conversation database: the minimal
-// varint for 2^64 - 1, which Antigravity writes at .1.9.2. It is valid 64-bit
-// protobuf, but it does not fit in a float64. encodeAntigravityTestVarint uses
+// 2^64 - 1 as Antigravity writes it at .1.9.2. encodeAntigravityTestVarint uses
 // 32-bit bitwise operators, so it cannot produce these bytes.
 const ANTIGRAVITY_UINT64_MAX_VARINT = Buffer.from([
   0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01,
@@ -12738,9 +12736,36 @@ function antigravityStepIndexField(stepIndex) {
   );
 }
 
+function buildAntigravityUint64MaxProto() {
+  return encodeAntigravityTestLd(
+    1,
+    Buffer.concat([
+      encodeAntigravityTestLd(19, "gemini-3.8-flash"),
+      encodeAntigravityTestLd(
+        9,
+        Buffer.concat([
+          encodeAntigravityTestTag(2, 0),
+          ANTIGRAVITY_UINT64_MAX_VARINT,
+          encodeAntigravityTestLd(10, encodeAntigravityTestVi(1, 3200)),
+        ]),
+      ),
+      encodeAntigravityTestLd(
+        4,
+        Buffer.concat([
+          encodeAntigravityTestVi(2, 1000),
+          encodeAntigravityTestVi(3, 200),
+          encodeAntigravityTestVi(5, 2000),
+          encodeAntigravityTestVi(9, 150),
+          encodeAntigravityTestVi(10, 50),
+        ]),
+      ),
+      antigravityStepIndexField(0),
+    ]),
+  );
+}
+
 test("extractAntigravityGenInfo keeps a record whose ignored field holds a 64-bit value", () => {
-  // The oversized value sits before the context-token field inside field 9, as
-  // it does on disk, so a decoder that fails on it never reaches field 10.
+  // As on disk, the oversized value precedes the context tokens in field 9.
   const f9 = encodeAntigravityTestLd(
     9,
     Buffer.concat([
@@ -12795,14 +12820,11 @@ test("extractAntigravityGenInfo does not bill a 64-bit value that lands in a tok
   const info = extractAntigravityGenInfo(proto);
 
   assert.ok(info, "the readable sibling fields must survive");
-  // Saturating to Number.MAX_SAFE_INTEGER would report 9,007,199,254,740,991
-  // prompt tokens here.
   assert.equal(info.uncachedInput, 100);
   assert.equal(info.cachedInput, 16319);
 });
 
 test("extractAntigravityGenInfo rejects a varint wider than 64 bits", () => {
-  // Only the lowest payload bit of a tenth varint byte fits in 64 bits.
   const tooWide = Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02]);
   const proto = encodeAntigravityTestLd(
     1,
@@ -14541,33 +14563,6 @@ test("parseAntigravityIncremental reconciles delayed SQLite metadata updates and
 test("parseAntigravityIncremental corrects a session synced before the extractor fix, exactly once", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-extractor-revision-"));
   try {
-    const f9 = encodeAntigravityTestLd(
-      9,
-      Buffer.concat([
-        encodeAntigravityTestTag(2, 0),
-        ANTIGRAVITY_UINT64_MAX_VARINT,
-        encodeAntigravityTestLd(10, encodeAntigravityTestVi(1, 3200)),
-      ]),
-    );
-    const f4 = encodeAntigravityTestLd(
-      4,
-      Buffer.concat([
-        encodeAntigravityTestVi(2, 1000),
-        encodeAntigravityTestVi(3, 200),
-        encodeAntigravityTestVi(5, 2000),
-        encodeAntigravityTestVi(9, 150),
-        encodeAntigravityTestVi(10, 50),
-      ]),
-    );
-    const proto = encodeAntigravityTestLd(
-      1,
-      Buffer.concat([
-        encodeAntigravityTestLd(19, "gemini-3.8-flash"),
-        f9,
-        f4,
-        antigravityStepIndexField(0),
-      ]),
-    );
     const { transcriptPath, dbPath, queuePath } = await setupAntigravitySqliteSession(tmp, {
       protos: [],
       lines: antigravityPlannerLines([
@@ -14589,9 +14584,8 @@ test("parseAntigravityIncremental corrects a session synced before the extractor
       total: row.total_tokens,
     });
 
-    // What a sync before the fix recorded. The old decoder threw on every row
-    // of this conversation, which leaves the same empty map as a table with no
-    // rows, so the session was billed from the text estimate.
+    // The old decoder dropped every row, which reads the same as an empty table,
+    // so a pre-fix sync billed the text estimate.
     const cursors = { version: 1, files: {}, updatedAt: null };
     await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
     const estimated = (await readJsonLines(queuePath)).at(-1);
@@ -14599,10 +14593,9 @@ test("parseAntigravityIncremental corrects a session synced before the extractor
 
     sqliteCli.execFileSync("sqlite3", [
       dbPath,
-      `INSERT INTO gen_metadata (idx, data) VALUES (0, X'${proto.toString("hex")}');`,
+      `INSERT INTO gen_metadata (idx, data) VALUES (0, X'${buildAntigravityUint64MaxProto().toString("hex")}');`,
     ]);
 
-    // The totals a correct reader produces from a clean cursor and queue.
     const referenceCursors = { version: 1, files: {}, updatedAt: null };
     const referenceQueuePath = path.join(tmp, "queue-reference.jsonl");
     await parseAntigravityIncremental({
@@ -14613,10 +14606,8 @@ test("parseAntigravityIncremental corrects a session synced before the extractor
     const correct = (await readJsonLines(referenceQueuePath)).at(-1);
     assert.equal(correct.cached_input_tokens, 2000);
 
-    // A pre-fix cursor was written against the database as it is today, so it
-    // matches the current identity, and it predates the extractor revision.
-    // With the identity adopted, the stale extractor is the only reason left to
-    // reparse: the unchanged-file fast path would otherwise keep the estimate.
+    // Adopt the current database identity so the missing extractor revision is
+    // the only reason left to reparse.
     const stale = cursors.files[transcriptPath];
     for (const [key, value] of Object.entries(referenceCursors.files[transcriptPath])) {
       if (key.startsWith("db") && key !== "dbReadOk") stale[key] = value;
@@ -14628,9 +14619,7 @@ test("parseAntigravityIncremental corrects a session synced before the extractor
       cursors,
       queuePath,
     });
-    // Readers keep the latest row per (source, model, hour_start). The estimate
-    // was billed with no model, so the correction touches two buckets: it zeroes
-    // antigravity-unknown and applies the real usage to the model that ran.
+    // Two buckets: antigravity-unknown is zeroed and gemini-3.8-flash is applied.
     assert.equal(upgraded.bucketsQueued, 2);
     const latest = new Map();
     for (const row of await readJsonLines(queuePath)) latest.set(row.model, row);
@@ -14657,33 +14646,8 @@ test("parseAntigravityIncremental corrects a session synced before the extractor
 test("parseAntigravityIncremental rebuilds a capped ledger synced before the extractor fix", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-extractor-capped-"));
   try {
-    const proto = encodeAntigravityTestLd(
-      1,
-      Buffer.concat([
-        encodeAntigravityTestLd(19, "gemini-3.8-flash"),
-        encodeAntigravityTestLd(
-          9,
-          Buffer.concat([
-            encodeAntigravityTestTag(2, 0),
-            ANTIGRAVITY_UINT64_MAX_VARINT,
-            encodeAntigravityTestLd(10, encodeAntigravityTestVi(1, 3200)),
-          ]),
-        ),
-        encodeAntigravityTestLd(
-          4,
-          Buffer.concat([
-            encodeAntigravityTestVi(2, 1000),
-            encodeAntigravityTestVi(3, 200),
-            encodeAntigravityTestVi(5, 2000),
-            encodeAntigravityTestVi(9, 150),
-            encodeAntigravityTestVi(10, 50),
-          ]),
-        ),
-        antigravityStepIndexField(0),
-      ]),
-    );
     const { transcriptPath, queuePath } = await setupAntigravitySqliteSession(tmp, {
-      protos: [proto],
+      protos: [buildAntigravityUint64MaxProto()],
       lines: antigravityPlannerLines([
         {
           userStep: 0,
@@ -14699,9 +14663,8 @@ test("parseAntigravityIncremental rebuilds a capped ledger synced before the ext
     const cursors = { version: 1, files: {}, updatedAt: null };
     await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
 
-    // A pre-fix cursor whose ledger reached ANTIGRAVITY_MAX_CONTRIBUTIONS: the
-    // 13:00 bucket is still in the aggregate but no longer tracked for this file,
-    // and the cursor predates the extractor revision. Nothing on disk changed.
+    // A pre-fix cursor whose ledger hit ANTIGRAVITY_MAX_CONTRIBUTIONS: 13:00 is
+    // still aggregated but no longer tracked for this file.
     cursors.files[transcriptPath].contributionsComplete = false;
     delete cursors.files[transcriptPath].extractorRevision;
     const stale = bucketKey("antigravity", "gemini-3.8-flash", "2026-04-05T13:00:00.000Z");
@@ -14722,8 +14685,6 @@ test("parseAntigravityIncremental rebuilds a capped ledger synced before the ext
 
     await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
 
-    // Subtracting only the retained contribution would leave 13:00 in place.
-    // A stale extractor has to rebuild the source, as a database change does.
     assert.equal(cursors.hourly.buckets[stale]?.totals?.total_tokens ?? 0, 0, "the untracked bucket is cleared");
     const latest = new Map();
     for (const row of await readJsonLines(queuePath)) latest.set(`${row.model}|${row.hour_start}`, row);

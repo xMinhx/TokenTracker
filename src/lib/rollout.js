@@ -19339,7 +19339,6 @@ async function statAntigravityDatabase(dbPath) {
 
 // Neither the transcript nor the database changes when the extractor does, so
 // without this stamp a session read before an extractor fix keeps its totals.
-// Every place that asks whether a cursor's totals are current must use this.
 function antigravityExtractorStale(previous, dbPath) {
   return Boolean(
     dbPath && previous && previous.extractorRevision !== ANTIGRAVITY_EXTRACTOR_REVISION,
@@ -20104,8 +20103,7 @@ function decodeAntigravityVarint(buf, offset) {
     if (!(b & 0x80)) {
       if (Number.isSafeInteger(res)) return [res, offset];
       // Antigravity writes 2^64 - 1 in fields the extractor never reads. The
-      // float sum above has already lost precision, so re-read the bytes into a
-      // BigInt rather than returning a rounded or saturated number.
+      // float sum has already lost precision, so re-read the bytes exactly.
       let exact = 0n;
       for (let i = start; i < offset; i++) {
         exact |= BigInt(buf[i] & 0x7f) << BigInt((i - start) * 7);
@@ -20128,16 +20126,14 @@ function findAntigravityProtoFields(buf) {
     const wireType = tag & 7;
     if (fieldNum <= 0) throw new RangeError("invalid Antigravity protobuf field number");
     if (wireType === 0) {
-      // Values past 2^53 stay BigInt. Every token count is read through
-      // Number.isSafeInteger, which rejects a BigInt, so an out-of-range value
-      // is dropped instead of being billed.
+      // May be a BigInt; token reads use Number.isSafeInteger, so it is never billed.
       const [val, vNext] = decodeAntigravityVarint(buf, offset);
       offset = vNext;
       fields.push({ num: fieldNum, val });
     } else if (wireType === 2) {
       const [len, lNext] = decodeAntigravityVarint(buf, offset);
       offset = lNext;
-      if (typeof len !== "number" || len > buf.length - offset) {
+      if (len > buf.length - offset) {
         throw new RangeError("truncated Antigravity protobuf field");
       }
       fields.push({ num: fieldNum, val: buf.subarray(offset, offset + len) });
