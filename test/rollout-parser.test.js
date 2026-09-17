@@ -14168,7 +14168,8 @@ test("parseAntigravityIncremental processes appended legacy session when another
       "gemini-3.8-flash",
       "2026-04-05T14:00:00.000Z",
     );
-    const firstStat = await fs.stat(first.transcriptPath);
+    const firstFile = await fs.open(first.transcriptPath, "r+");
+    const firstStat = await firstFile.stat();
     const secondStat = await fs.stat(second.transcriptPath);
     const legacyFile = (st, lines, contextTokens) => ({
       inode: st.ino || 0,
@@ -14242,11 +14243,15 @@ test("parseAntigravityIncremental processes appended legacy session when another
         },
       ]),
     ];
-    await fs.writeFile(
-      first.transcriptPath,
-      appendedFirstLines.map((line) => JSON.stringify(line)).join("\n"),
-      "utf8",
-    );
+    try {
+      await firstFile.truncate(0);
+      await firstFile.writeFile(
+        appendedFirstLines.map((line) => JSON.stringify(line)).join("\n"),
+        "utf8",
+      );
+    } finally {
+      await firstFile.close();
+    }
 
     // Deleting the second file must NOT freeze or defer the first file!
     const result = await parseAntigravityIncremental({
