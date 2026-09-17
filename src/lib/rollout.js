@@ -19695,11 +19695,12 @@ async function parseAntigravityIncremental({
     const projectKey = projectContext?.projectKey || null;
     const projectChanged =
       projectEnabled && antigravityProjectAssignmentChanged(prev, projectContext);
+    const baselineLine = Number(prev?.baselineLine || (isLegacy ? prev?.lastLine || 0 : 0));
 
     // Legacy migration: "no retroactive claim". The file's history stays in the
     // old aggregate untouched. If unchanged, stamp v2 cursor with contributions: {}
     // and queue no buckets.
-    if (isLegacy && (sameTranscriptStats || sameTranscriptContent)) {
+    if (!needsFullRebuild && isLegacy && (sameTranscriptStats || sameTranscriptContent)) {
       const contributionState = capAntigravityContributions({});
       fileCursors[key] = {
         ...prev,
@@ -19721,6 +19722,7 @@ async function parseAntigravityIncremental({
         projectConfigMtimeMs: projectContext?.configMtimeMs ?? null,
         projectConfigSize: projectContext?.configSize ?? null,
         projectReconciliationDeferred: false,
+        baselineLine,
         cursorVersion: ANTIGRAVITY_CURSOR_VERSION,
         extractorRevision: ANTIGRAVITY_EXTRACTOR_REVISION,
         lastLine: Number(prev.lastLine || 0),
@@ -19863,6 +19865,7 @@ async function parseAntigravityIncremental({
         filePath,
         ...(transcriptBytes ? { rawBuffer: transcriptBytes } : {}),
         lastLine: 0,
+        baselineLine: needsFullRebuild ? 0 : baselineLine,
         watermarkLine: Number(prev?.lastLine || 0),
         initialUsageSource: prev?.usageSource,
         hourlyState,
@@ -19891,6 +19894,7 @@ async function parseAntigravityIncremental({
         filePath,
         ...(transcriptBytes ? { rawBuffer: transcriptBytes } : {}),
         lastLine,
+        baselineLine,
         initialContextTokens,
         initialPrevContext,
         initialModel,
@@ -19978,6 +19982,7 @@ async function parseAntigravityIncremental({
       projectConfigMtimeMs: projectContext?.configMtimeMs ?? null,
       projectConfigSize: projectContext?.configSize ?? null,
       projectReconciliationDeferred: false,
+      baselineLine: needsFullRebuild ? 0 : baselineLine,
       cursorVersion: ANTIGRAVITY_CURSOR_VERSION,
       extractorRevision: ANTIGRAVITY_EXTRACTOR_REVISION,
       lastLine: result.lastLine,
@@ -20250,6 +20255,7 @@ async function parseAntigravityFile({
   rawBuffer = null,
   lastLine = 0,
   maxLine = null,
+  baselineLine = 0,
   watermarkLine = 0,
   applyBuckets = true,
   initialContextTokens,
@@ -20461,7 +20467,11 @@ async function parseAntigravityFile({
       }
     }
 
-    if (!billedPlanner) {
+    if (!billedPlanner || i < baselineLine) {
+      if (billedPlanner) {
+        previousContextTokens = contextTokens;
+        lastPlannerModel = model;
+      }
       contextTokens += eventContextTokens;
       lastCompletedLine = i + 1;
       continue;

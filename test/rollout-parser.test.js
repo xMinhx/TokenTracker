@@ -13944,6 +13944,123 @@ test("parseAntigravityIncremental migrates a legacy cursor with an appended tran
   }
 });
 
+test("parseAntigravityIncremental preserves legacy baseline without double-counting when SQLite changes after cutover", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-baseline-recon-"));
+  try {
+    const initialLines = antigravityPlannerLines([
+      {
+        userStep: 0,
+        userAt: "2026-04-05T14:00:00.000Z",
+        userContent: "hello",
+        plannerStep: 1,
+        plannerAt: "2026-04-05T14:01:00.000Z",
+        plannerContent: "response",
+        thinking: "reasoning",
+      },
+    ]);
+    const { transcriptPath, dbPath, queuePath } = await setupAntigravitySqliteSession(tmp, {
+      protos: [
+        buildAntigravityTestProto({
+          model: "gemini-3.8-flash",
+          contextTokens: 1000,
+          lastStepIndex: 0,
+          uncachedInput: 1000,
+          cachedInput: 2000,
+          outputTokens: 200,
+          textOutput: 150,
+          reasoningOutput: 50,
+        }),
+      ],
+      lines: initialLines,
+    });
+
+    const st = await fs.stat(transcriptPath);
+    const aggregateKey = bucketKey("antigravity", "gemini-3.8-flash", "2026-04-05T14:00:00.000Z");
+    const baselineTotals = {
+      input_tokens: 1000,
+      cached_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      output_tokens: 2,
+      reasoning_output_tokens: 3,
+      total_tokens: 1005,
+      billable_total_tokens: 1005,
+      total_cost_usd: 0,
+      conversation_count: 1,
+    };
+    const cursors = {
+      version: 1,
+      files: {
+        [transcriptPath]: {
+          inode: st.ino || 0,
+          size: st.size,
+          mtimeMs: st.mtimeMs,
+          lastLine: initialLines.length,
+          contextTokens: 1000,
+          previousContextTokens: 0,
+          currentModel: "gemini-3.8-flash",
+          lastPlannerModel: "gemini-3.8-flash",
+          usageSource: "sqlite",
+        },
+      },
+      hourly: {
+        version: 3,
+        buckets: {
+          [aggregateKey]: {
+            totals: structuredClone(baselineTotals),
+          },
+        },
+        updatedAt: new Date().toISOString(),
+      },
+      updatedAt: null,
+    };
+
+    // First sync: cut over from legacy
+    const cutover = await parseAntigravityIncremental({
+      sessionFiles: [transcriptPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(cutover.eventsAggregated, 0);
+    assert.equal(cutover.bucketsQueued, 0);
+    assert.equal(cursors.files[transcriptPath].cursorVersion, ANTIGRAVITY_CURSOR_VERSION);
+    assert.equal(cursors.files[transcriptPath].baselineLine, initialLines.length);
+
+    // Now update SQLite metadata, forcing needsReconcile on the cutover cursor
+    const updatedProto = buildAntigravityTestProto({
+      model: "gemini-3.8-flash",
+      contextTokens: 1200,
+      lastStepIndex: 0,
+      uncachedInput: 1000,
+      cachedInput: 2500,
+      outputTokens: 200,
+      textOutput: 150,
+      reasoningOutput: 50,
+    });
+    sqliteCli.execFileSync("sqlite3", [
+      dbPath,
+      `UPDATE gen_metadata SET data = X'${updatedProto.toString("hex")}' WHERE idx = 0;`,
+    ]);
+    const futureDate = new Date(Date.now() + 5000);
+    await fs.utimes(dbPath, futureDate, futureDate);
+
+    // Second sync: reconciliation must NOT double count Turn 1
+    const reconcileSync = await parseAntigravityIncremental({
+      sessionFiles: [transcriptPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(reconcileSync.eventsAggregated, 0);
+    assert.equal(reconcileSync.bucketsQueued, 0);
+    assert.deepEqual(
+      cursors.hourly.buckets[aggregateKey].totals,
+      baselineTotals,
+      "baseline aggregate must not double-count historical turns when SQLite reconciles",
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseAntigravityIncremental does not commit state when queue append fails", async (t) => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-queue-failure-"));
   try {
