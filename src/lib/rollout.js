@@ -19341,7 +19341,10 @@ async function statAntigravityDatabase(dbPath) {
 // without this stamp a session read before an extractor fix keeps its totals.
 function antigravityExtractorStale(previous, dbPath) {
   return Boolean(
-    dbPath && previous && previous.extractorRevision !== ANTIGRAVITY_EXTRACTOR_REVISION,
+    dbPath &&
+      previous &&
+      previous.cursorVersion === ANTIGRAVITY_CURSOR_VERSION &&
+      previous.extractorRevision !== ANTIGRAVITY_EXTRACTOR_REVISION,
   );
 }
 
@@ -19493,7 +19496,6 @@ async function parseAntigravityIncremental({
       .map((entry) => (typeof entry === "string" ? entry : entry?.path))
       .filter(Boolean),
   );
-  const legacyMigrationPaths = new Set();
   const incompleteContributionPaths = new Set();
   const deferredIncompletePaths = new Set();
   let needsFullRebuild = false;
@@ -19501,41 +19503,13 @@ async function parseAntigravityIncremental({
     if (!resolveAntigravityDbPath(filePath) || !prev || Number(prev.lastLine || 0) <= 0) {
       continue;
     }
-    if (
+    const isLegacy =
       prev.cursorVersion !== ANTIGRAVITY_CURSOR_VERSION ||
       !prev.contributions ||
-      typeof prev.contributions !== "object"
-    ) {
-      // Legacy totals have no file ownership. Keep them in place and reconcile
-      // each live legacy file against the v0.96.2 transcript baseline below;
-      // deleting missing paths here would erase their historical aggregate.
-      legacyMigrationPaths.add(filePath);
-      continue;
+      typeof prev.contributions !== "object";
+    if (!isLegacy && prev.contributionsComplete === false) {
+      incompleteContributionPaths.add(filePath);
     }
-    if (prev.contributionsComplete === false) incompleteContributionPaths.add(filePath);
-  }
-
-  // A complete inventory of every legacy file can be rebuilt from scratch,
-  // which avoids guessing the old aggregate's per-file split. If even one
-  // legacy file is absent, however, retain the aggregate and migrate only live
-  // legacy files below so deletion or a transient discovery failure cannot erase
-  // history that has no remaining ownership record.
-  const missingLegacyPaths = [];
-  for (const filePath of legacyMigrationPaths) {
-    if (!liveFilePaths.has(filePath)) {
-      missingLegacyPaths.push(filePath);
-      continue;
-    }
-    const st = await fs.stat(filePath).catch(() => null);
-    if (!st || !st.isFile()) missingLegacyPaths.push(filePath);
-  }
-  const preserveUnknownLegacyAggregate = missingLegacyPaths.length > 0;
-  if (
-    inventoryComplete &&
-    legacyMigrationPaths.size > 0 &&
-    !preserveUnknownLegacyAggregate
-  ) {
-    needsFullRebuild = true;
   }
 
   // Project reassignment is another full-ledger change: a capped ledger cannot
@@ -19557,7 +19531,7 @@ async function parseAntigravityIncremental({
   if (!needsFullRebuild && incompleteContributionPaths.size > 0) {
     for (const filePath of incompleteContributionPaths) {
       if (!liveFilePaths.has(filePath)) {
-        if (!inventoryComplete || preserveUnknownLegacyAggregate) {
+        if (!inventoryComplete) {
           deferredIncompletePaths.add(filePath);
         } else {
           needsFullRebuild = true;
@@ -19594,7 +19568,7 @@ async function parseAntigravityIncremental({
         projectChanged = antigravityProjectAssignmentChanged(prev, projectContext);
       }
       if (!transcriptCanAppend || !sameDb || staleExtractor || !sameSource || projectChanged) {
-        if (!inventoryComplete || preserveUnknownLegacyAggregate) {
+        if (!inventoryComplete) {
           deferredIncompletePaths.add(filePath);
         } else {
           needsFullRebuild = true;
@@ -19638,28 +19612,18 @@ async function parseAntigravityIncremental({
     const key = filePath;
     if (deferredIncompletePaths.has(key)) continue;
     const prev = fileCursors[key] || null;
-    // A legacy cursor has no verifiable per-file contribution. If any legacy
-    // transcript is missing, subtracting a reconstructed value can corrupt
-    // the aggregate because v0.96.2 may have billed its SQLite context value.
-    // Wait for a complete inventory, then rebuild the source from scratch.
-    if (preserveUnknownLegacyAggregate && legacyMigrationPaths.has(key)) {
-      filesProcessed += 1;
-      if (cb) {
-        cb({
-          index: idx + 1,
-          total: totalFiles,
-          filePath,
-          filesProcessed,
-          eventsAggregated,
-          bucketsQueued: touchedBuckets.size,
-        });
-      }
-      continue;
-    }
+
     const inode = st.ino || 0;
     const size = Number.isFinite(st.size) ? st.size : 0;
     const mtimeMs = Number.isFinite(st.mtimeMs) ? st.mtimeMs : 0;
     const ctimeMs = Number.isFinite(st.ctimeMs) ? st.ctimeMs : 0;
+
+    const isLegacy = Boolean(
+      prev &&
+        (prev.cursorVersion !== ANTIGRAVITY_CURSOR_VERSION ||
+          !prev.contributions ||
+          typeof prev.contributions !== "object"),
+    );
 
     const dbPath = resolveAntigravityDbPath(filePath);
     const dbIdentity = await statAntigravityDatabase(dbPath);
@@ -19673,8 +19637,8 @@ async function parseAntigravityIncremental({
     const sameDb = prev && sameAntigravityDatabase(prev, dbIdentity);
     const sameSource =
       !prev || (prev.source == null ? defaultSource : prev.source) === fileSource;
-    const currentVersion = prev && prev.cursorVersion === ANTIGRAVITY_CURSOR_VERSION;
-    const staleExtractor = antigravityExtractorStale(prev, dbPath);
+    const currentVersion = !isLegacy && prev?.cursorVersion === ANTIGRAVITY_CURSOR_VERSION;
+    const staleExtractor = !isLegacy && antigravityExtractorStale(prev, dbPath);
     let transcriptBytes = null;
     let transcriptHash = typeof prev?.transcriptHash === "string" ? prev.transcriptHash : null;
     let sameTranscriptContent = sameTranscriptStats;
@@ -19703,20 +19667,22 @@ async function parseAntigravityIncremental({
       }
       transcriptHash = hashAntigravityTranscript(transcriptBytes);
       sameTranscriptContent =
-        Boolean(transcriptHash && prev?.transcriptHash === transcriptHash && prev.size === size);
+        Boolean(
+          (prev?.transcriptHash && transcriptHash && prev.transcriptHash === transcriptHash && prev.size === size) ||
+            (!prev?.transcriptHash && sameTranscriptStats),
+        );
       transcriptCanAppend =
         Boolean(
           prev &&
-          transcriptBytes &&
-          size >= Number(prev.size || 0) &&
-          antigravityTranscriptPrefixMatches(transcriptBytes, prev),
+            transcriptBytes &&
+            size >= Number(prev.size || 0) &&
+            (prev.transcriptHash
+              ? antigravityTranscriptPrefixMatches(transcriptBytes, prev)
+              : sameInode),
         );
     }
 
-    const deferProjectReconciliation =
-      preserveUnknownLegacyAggregate &&
-      (prev?.projectReconciliationDeferred === true || legacyMigrationPaths.has(key));
-    const projectContext = projectEnabled && !deferProjectReconciliation
+    const projectContext = projectEnabled
       ? await resolveProjectContextForFile({
           filePath,
           projectMetaCache,
@@ -19727,29 +19693,62 @@ async function parseAntigravityIncremental({
       : null;
     const projectRef = projectContext?.projectRef || null;
     const projectKey = projectContext?.projectKey || null;
-    const effectiveProjectState = deferProjectReconciliation ? null : projectState;
-    const effectiveProjectTouchedBuckets = deferProjectReconciliation
-      ? null
-      : projectTouchedBuckets;
-    const effectiveProjectRef = deferProjectReconciliation ? null : projectRef;
-    const effectiveProjectKey = deferProjectReconciliation ? null : projectKey;
     const projectChanged =
-      projectEnabled &&
-      !prev?.projectReconciliationDeferred &&
-      !deferProjectReconciliation &&
-      antigravityProjectAssignmentChanged(prev, projectContext);
+      projectEnabled && antigravityProjectAssignmentChanged(prev, projectContext);
+
+    // Legacy migration: "no retroactive claim". The file's history stays in the
+    // old aggregate untouched. If unchanged, stamp v2 cursor with contributions: {}
+    // and queue no buckets.
+    if (isLegacy && (sameTranscriptStats || sameTranscriptContent)) {
+      const contributionState = capAntigravityContributions({});
+      fileCursors[key] = {
+        ...prev,
+        inode,
+        size,
+        mtimeMs,
+        ctimeMs,
+        source: fileSource,
+        transcriptHash:
+          transcriptHash ||
+          (transcriptBytes
+            ? hashAntigravityTranscript(transcriptBytes)
+            : prev?.transcriptHash || null),
+        ...dbIdentity,
+        projectKey: projectRef ? projectKey : null,
+        projectRef: projectRef || null,
+        projectStatus: projectContext?.status || null,
+        projectConfigPath: projectContext?.configPath || null,
+        projectConfigMtimeMs: projectContext?.configMtimeMs ?? null,
+        projectConfigSize: projectContext?.configSize ?? null,
+        projectReconciliationDeferred: false,
+        cursorVersion: ANTIGRAVITY_CURSOR_VERSION,
+        extractorRevision: ANTIGRAVITY_EXTRACTOR_REVISION,
+        lastLine: Number(prev.lastLine || 0),
+        contextTokens: Number(prev.contextTokens || 0),
+        previousContextTokens: Number(prev.previousContextTokens || 0),
+        currentModel: prev.currentModel,
+        lastPlannerModel: prev.lastPlannerModel,
+        usageSource: prev.usageSource || (dbIdentity ? "sqlite" : "estimated"),
+        dbReadOk: prev.dbReadOk !== false,
+        contributions: contributionState.contributions,
+        contributionsComplete: contributionState.complete,
+        updatedAt: new Date().toISOString(),
+      };
+      filesProcessed += 1;
+      if (cb) {
+        cb({
+          index: idx + 1,
+          total: totalFiles,
+          filePath,
+          filesProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+      continue;
+    }
 
     const metadataRetryNeeded = currentVersion && Boolean(dbPath) && prev?.dbReadOk !== true;
-    const deferIncompleteReconciliation =
-      preserveUnknownLegacyAggregate &&
-      incompleteContributionPaths.has(key) &&
-      (metadataRetryNeeded ||
-        !currentVersion ||
-        !sameDb ||
-        staleExtractor ||
-        projectChanged ||
-        (!sameTranscriptContent && !transcriptCanAppend));
-    if (deferIncompleteReconciliation) continue;
     if (
       sameTranscriptStats &&
       sameTranscriptContent &&
@@ -19778,14 +19777,13 @@ async function parseAntigravityIncremental({
     // Reconcile historical contributions whenever the cursor needs migration or
     // SQLite changed, even when new transcript lines were appended in the same
     // sync. Otherwise the incremental branch stamps a migrated cursor without
-    // repairing its old, incomplete totals.
-    const legacyMigration =
-      !needsFullRebuild && prev && legacyMigrationPaths.has(key);
+    // repairing its old, incomplete totals. Legacy cursors have no retroactive
+    // claim and are not routed through reconciliation.
     const needsReconcile =
       !needsFullRebuild &&
+      !isLegacy &&
       prev &&
-      (legacyMigration ||
-        metadataRetryNeeded ||
+      (metadataRetryNeeded ||
         !currentVersion ||
         !sameDb ||
         staleExtractor ||
@@ -19831,70 +19829,7 @@ async function parseAntigravityIncremental({
       protectExactState && projectTouchedBuckets ? new Set(projectTouchedBuckets) : null;
     let result;
 
-    if (legacyMigration) {
-      // Reconstruct only the historical portion that the pre-v2 parser had
-      // already consumed from transcript data. Do not use today's SQLite
-      // metadata: it may be a delayed/corrected value that was not part of the
-      // old aggregate. This permits replacement for live legacy files while
-      // leaving aggregate totals belonging to deleted legacy files untouched.
-      const legacyResult = await parseAntigravityFile({
-        filePath,
-        ...(transcriptBytes ? { rawBuffer: transcriptBytes } : {}),
-        lastLine: 0,
-        maxLine: Number(prev.lastLine || 0),
-        legacyMode: true,
-        initialModel: prev.currentModel,
-        applyBuckets: false,
-        source: fileSource,
-        projectKey: deferProjectReconciliation
-          ? null
-          : typeof prev.projectKey === "string" && prev.projectKey
-            ? prev.projectKey
-            : projectKey,
-        projectRef: deferProjectReconciliation
-          ? null
-          : typeof prev.projectRef === "string" && prev.projectRef
-            ? prev.projectRef
-            : projectRef,
-      });
-      for (const c of Object.values(legacyResult.contributions || {})) {
-        if (!c || !c.totals) continue;
-        const oldBucket = getHourlyBucket(hourlyState, c.source, c.model, c.bucketStart);
-        subtractTotals(oldBucket.totals, c.totals);
-        touchedBuckets.add(bucketKey(c.source, c.model, c.bucketStart));
-        if (
-          !deferProjectReconciliation &&
-          projectEnabled &&
-          c.projectKey &&
-          projectState &&
-          projectTouchedBuckets
-        ) {
-          const oldProjectBucket = getProjectBucket(
-            projectState,
-            c.projectKey,
-            c.source,
-            c.bucketStart,
-            c.projectRef || null,
-          );
-          subtractTotals(oldProjectBucket.totals, c.totals);
-          projectTouchedBuckets.add(projectBucketKey(c.projectKey, c.source, c.bucketStart));
-        }
-      }
-      result = await parseAntigravityFile({
-        filePath,
-        ...(transcriptBytes ? { rawBuffer: transcriptBytes } : {}),
-        lastLine: 0,
-        watermarkLine: Number(prev.lastLine || 0),
-        initialUsageSource: prev?.usageSource,
-        hourlyState,
-        touchedBuckets,
-        source: fileSource,
-        projectState: effectiveProjectState,
-        projectTouchedBuckets: effectiveProjectTouchedBuckets,
-        projectRef: effectiveProjectRef,
-        projectKey: effectiveProjectKey,
-      });
-    } else if (needsFullRebuild || needsReconcile) {
+    if (needsFullRebuild || needsReconcile) {
       if (
         !needsFullRebuild &&
         prev &&
@@ -19907,7 +19842,6 @@ async function parseAntigravityIncremental({
           subtractTotals(oldBucket.totals, c.totals);
           touchedBuckets.add(bucketKey(c.source, c.model, c.bucketStart));
           if (
-            !deferProjectReconciliation &&
             projectEnabled &&
             c.projectKey &&
             projectState &&
@@ -19934,10 +19868,10 @@ async function parseAntigravityIncremental({
         hourlyState,
         touchedBuckets,
         source: fileSource,
-        projectState: effectiveProjectState,
-        projectTouchedBuckets: effectiveProjectTouchedBuckets,
-        projectRef: effectiveProjectRef,
-        projectKey: effectiveProjectKey,
+        projectState,
+        projectTouchedBuckets,
+        projectRef,
+        projectKey,
       });
     } else {
       const canResume = sameTranscriptContent || transcriptCanAppend;
@@ -19965,10 +19899,10 @@ async function parseAntigravityIncremental({
         hourlyState,
         touchedBuckets,
         source: fileSource,
-        projectState: effectiveProjectState,
-        projectTouchedBuckets: effectiveProjectTouchedBuckets,
-        projectRef: effectiveProjectRef,
-        projectKey: effectiveProjectKey,
+        projectState,
+        projectTouchedBuckets,
+        projectRef,
+        projectKey,
       });
 
       const mergedContributions = { ...(prev?.contributions || {}) };
@@ -20037,13 +19971,13 @@ async function parseAntigravityIncremental({
       source: fileSource,
       transcriptHash,
       ...dbIdentity,
-      projectKey: effectiveProjectKey || null,
-      projectRef: effectiveProjectRef || null,
-      projectStatus: deferProjectReconciliation ? null : projectContext?.status || null,
-      projectConfigPath: deferProjectReconciliation ? null : projectContext?.configPath || null,
-      projectConfigMtimeMs: deferProjectReconciliation ? null : projectContext?.configMtimeMs ?? null,
-      projectConfigSize: deferProjectReconciliation ? null : projectContext?.configSize ?? null,
-      projectReconciliationDeferred: deferProjectReconciliation,
+      projectKey: projectRef ? projectKey : null,
+      projectRef: projectRef || null,
+      projectStatus: projectContext?.status || null,
+      projectConfigPath: projectContext?.configPath || null,
+      projectConfigMtimeMs: projectContext?.configMtimeMs ?? null,
+      projectConfigSize: projectContext?.configSize ?? null,
+      projectReconciliationDeferred: false,
       cursorVersion: ANTIGRAVITY_CURSOR_VERSION,
       extractorRevision: ANTIGRAVITY_EXTRACTOR_REVISION,
       lastLine: result.lastLine,
@@ -20318,7 +20252,6 @@ async function parseAntigravityFile({
   maxLine = null,
   watermarkLine = 0,
   applyBuckets = true,
-  legacyMode = false,
   initialContextTokens,
   initialPrevContext,
   initialModel,
@@ -20364,7 +20297,7 @@ async function parseAntigravityFile({
   let eventsAggregated = 0;
   const contributions = {};
   const dbPath = resolveAntigravityDbPath(filePath);
-  const stepMap = !legacyMode && dbPath ? readAntigravityConversationDb(dbPath) : null;
+  const stepMap = dbPath ? readAntigravityConversationDb(dbPath) : null;
   // Resume cached context-token total + model so historical lines (i < lastLine)
   // don't need to be re-tokenized on every sync. Falls back to a full re-walk
   // when the cached state is missing (legacy cursor) or the file rotated.
@@ -20445,7 +20378,10 @@ async function parseAntigravityFile({
     if (!isNewEvent) {
       if (parsed.type === "PLANNER_RESPONSE") {
         if (dbTurn?.hasUsageMetadata) {
-          contextTokens = (dbTurn.uncachedInput || 0) + (dbTurn.cachedInput || 0);
+          contextTokens =
+            dbContextTokens > 0
+              ? dbContextTokens
+              : (dbTurn.uncachedInput || 0) + (dbTurn.cachedInput || 0);
         } else if (dbContextTokens > 0) {
           contextTokens = dbContextTokens;
         }
@@ -20478,7 +20414,7 @@ async function parseAntigravityFile({
     let billedPlanner = false;
 
     if (parsed.type === "PLANNER_RESPONSE") {
-      if (dbTurn?.hasUsageMetadata && !legacyMode) {
+      if (dbTurn?.hasUsageMetadata) {
         const uncached = dbTurn.uncachedInput || 0;
         const cached = dbTurn.cachedInput || 0;
         const reasoning = dbTurn.reasoningOutput || 0;
@@ -20498,7 +20434,7 @@ async function parseAntigravityFile({
         delta.conversation_count = 1;
         billedPlanner = delta.total_tokens > 0;
 
-        contextTokens = uncached + cached;
+        contextTokens = dbContextTokens > 0 ? dbContextTokens : uncached + cached;
       } else {
         const content = typeof parsed.content === "string" ? parsed.content : "";
         const thinking = typeof parsed.thinking === "string" ? parsed.thinking : "";
@@ -22736,6 +22672,7 @@ module.exports = {
 
   // Antigravity (Google Gemini) - Session logs parser
   ANTIGRAVITY_CURSOR_VERSION,
+  ANTIGRAVITY_EXTRACTOR_REVISION,
   resolveAntigravityBrainDirs,
   listAntigravitySessionFiles,
   listAntigravityTranscripts,
